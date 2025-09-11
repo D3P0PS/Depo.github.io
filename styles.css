@@ -1,0 +1,5 @@
+body { font-family: system-ui, sans-serif; margin: 0; padding: 1rem; background:#0b0b0b; color:#f1f1f1; }
+header, section { margin-bottom: 1rem; }
+label { display: block; margin: 0.5rem 0; }
+input, select, button { padding: 0.5rem; font-size: 1rem; }
+#action { font-weight: 700; margin-top: 0.5rem; }
