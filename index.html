@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Blackjack Strategy Companion</title>
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#111111" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Blackjack Strategy Companion</h1>
+    <button id="installBtn" hidden>Install</button>
+  </header>
+
+  <section id="rules">
+    <h2>Rule Profile</h2>
+    <label>Decks
+      <select id="decks">
+        <option>8</option><option>6</option><option>2</option><option>1</option>
+      </select>
+    </label>
+    <label>Dealer on Soft 17
+      <select id="s17">
+        <option value="H17">Hits</option>
+        <option value="S17">Stands</option>
+      </select>
+    </label>
+    <label>Double After Split
+      <select id="das">
+        <option value="true">Allowed</option>
+        <option value="false">Not allowed</option>
+      </select>
+    </label>
+    <label>Surrender
+      <select id="surrender">
+        <option value="none">No</option>
+        <option value="ls">Late</option>
+      </select>
+    </label>
+    <button id="loadChartBtn">Load Strategy</button>
+    <div id="edgePreview"></div>
+  </section>
+
+  <section id="hand">
+    <h2>Hand Input</h2>
+    <label>Hand Type
+      <select id="handType">
+        <option value="hard">Hard</option>
+        <option value="soft">Soft</option>
+        <option value="pair">Pair</option>
+      </select>
+    </label>
+    <label>Player Total / Pair Rank
+      <input id="playerVal" placeholder="e.g., 16 or 8" />
+    </label>
+    <label>Dealer Up-card
+      <input id="dealerUp" placeholder="2-11 (11=Ace)" />
+    </label>
+    <button id="decideBtn">Get Action</button>
+    <div id="action"></div>
+  </section>
+
+  <section id="session">
+    <h2>Session</h2>
+    <label>Bankroll Start <input id="bankrollStart" type="number" /></label>
+    <label>Stop Loss <input id="stopLoss" type="number" /></label>
+    <label>Win Cap <input id="winCap" type="number" /></label>
+    <button id="startSessionBtn">Start Session</button>
+    <div id="sessionStatus"></div>
+    <div>
+      <label>Stake <input id="stake" type="number" /></label>
+      <label>Result
+        <select id="result"><option value="win">Win</option><option value="loss">Loss</option><option value="push">Push</option></select>
+      </label>
+      <button id="logRoundBtn">Log Round</button>
+    </div>
+    <div id="sessionLog"></div>
+  </section>
+
+  <section id="sidebets">
+    <h2>Side Bets</h2>
+    <p>21+3 and Perfect Pairs typically have higher house edges and are disabled by default.</p>
+    <label>Enable Side Bets? <input id="enableSideBets" type="checkbox" /></label>
+    <div id="sideBetWarning"></div>
+  </section>
+
+  <script src="/app.js"></script>
+</body>
+</html>
