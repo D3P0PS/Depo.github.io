@@ -109,7 +109,17 @@ COUNTRY_HINTS = [
     "ecuador", "bolivia", "venezuela", "saudi", "qatar", "emirates", "morocco",
 ]
 
-DEFAULT_COMPETITIONS: List[str] = ["SA", "PL", "BL1", "PD", "FL1"]
+# Tutte le competizioni del piano gratuito di football-data.org, non solo le
+# cinque principali: la specifica chiede esplicitamente le seconde divisioni
+# quando il piano free le copre, ed e' il caso della Championship inglese.
+# Le seconde divisioni a pagamento (SB, BL2, SD, FL2) restano fuori dal
+# default: senza un piano superiore, football-data.org le rifiuta con 403 a
+# ogni corsa, e includerle di default vorrebbe dire stampare quel rifiuto a
+# chi non le ha mai chieste. Restano raggiungibili con --competitions all
+# o elencandole esplicitamente.
+DEFAULT_COMPETITIONS: List[str] = [
+    code for code, comp in COMPETITIONS.items() if comp.free_tier
+]
 
 
 @dataclass

@@ -387,11 +387,39 @@ def build_odds_client(args: argparse.Namespace, provider: str, key: str, http: H
     return OddsApiClient(key, http, regions=args.regions)
 
 
-def load_league_map(path: Optional[str]) -> Dict[str, str]:
+def load_league_map(path: Optional[str], provider: str) -> Dict[str, str]:
+    """Carica la mappa dei codici campionato, verificando il provider.
+
+    Gli id di SharpAPI ("germany_-_bundesliga") e le sport key di The Odds
+    API ("soccer_germany_bundesliga") non sono intercambiabili: una mappa
+    generata per l'uno, applicata all'altro, manda un codice che l'API non
+    riconosce e il fallimento sembra "campionato fuori stagione" invece che
+    "mappa sbagliata". Il file scritto da --leagues-out porta ora un tag
+    'provider'; se non corrisponde a quello richiesto in questa corsa, la
+    mappa viene scartata con un avviso invece di essere applicata a meta'.
+
+    Un file scritto a mano, senza il tag, e' accettato cosi' com'e': la
+    responsabilita' di usarlo col provider giusto resta di chi lo ha scritto.
+    """
     if not path:
         return {}
     with open(path, "r", encoding="utf-8") as fh:
         data = json.load(fh)
+
+    if isinstance(data, dict) and "leagues" in data and "provider" in data:
+        if str(data["provider"]) != provider:
+            print(
+                f"--league-map '{path}' e' stata generata per il provider "
+                f"'{data['provider']}', ma questa corsa usa '{provider}': "
+                "i codici non sono compatibili fra provider diversi (un id "
+                "SharpAPI non e' una sport key di The Odds API, e viceversa). "
+                "La mappa viene ignorata; rigenerala con --list-leagues usando "
+                f"--odds-provider {provider}.",
+                file=sys.stderr,
+            )
+            return {}
+        data = data["leagues"]
+
     return {str(k).upper(): str(v) for k, v in data.items()}
 
 
@@ -460,12 +488,15 @@ def cmd_list_leagues(args: argparse.Namespace, provider: str, key: str,
             uncertain.append(f"{code} ({motivo})")
         print()
 
-    blob = json.dumps(proposed, indent=2, ensure_ascii=False)
+    tagged = {"provider": provider, "leagues": proposed}
+    blob = json.dumps(tagged, indent=2, ensure_ascii=False)
     if args.leagues_out:
         with open(args.leagues_out, "w", encoding="utf-8") as fh:
             fh.write(blob + "\n")
-        print(f"Mappa scritta in {args.leagues_out}. Usala con:\n"
-              f"  python3 edge_scan.py --league-map {args.leagues_out}\n")
+        print(f"Mappa scritta in {args.leagues_out} (per il provider "
+              f"'{provider}'). Usala con:\n"
+              f"  python3 edge_scan.py --odds-provider {provider} "
+              f"--league-map {args.leagues_out}\n")
     else:
         print("Mappa proposta (salvala in un file e passala con --league-map):\n")
         print(blob + "\n")
@@ -726,7 +757,7 @@ def run(args: argparse.Namespace) -> int:
         verbose=args.verbose,
     )
     try:
-        overrides = load_league_map(args.league_map)
+        overrides = load_league_map(args.league_map, provider)
     except (OSError, ValueError) as exc:
         print(f"--league-map non leggibile: {exc}", file=sys.stderr)
         return 2

@@ -25,6 +25,17 @@ Le seconde divisioni (Serie B, 2. Bundesliga, LaLiga2, Ligue 2) non sono nel
 piano gratuito di football-data.org: vengono tentate e, in caso di `403`,
 saltate con un messaggio esplicito nel riepilogo.
 
+## --league-map è specifico per provider
+
+Il file scritto da `--list-leagues --leagues-out` porta un tag col provider
+per cui è stato generato. Usarlo con un altro provider (es. una mappa
+SharpAPI passata a una corsa `--odds-provider theoddsapi`) viene rifiutato
+con un avviso invece di essere applicato a metà: gli id di SharpAPI
+(`germany_-_bundesliga`) e le sport key di The Odds API
+(`soccer_germany_bundesliga`) non sono lo stesso codice, e un campionato
+interrogato con quello sbagliato risulta "non disponibile in questo momento"
+— un messaggio plausibile che nasconderebbe l'errore di mappatura vero.
+
 ## Chiavi API
 
 Ne servono due: una per i dati storici (obbligatoria) e una per le quote.
@@ -165,7 +176,7 @@ confronto con il modello resta fatto con un metodo noto e controllabile
 
 ```bash
 python3 edge_scan.py --self-test                      # verifica il modello, nessuna rete
-python3 edge_scan.py --date today                     # partite di oggi, 5 campionati principali
+python3 edge_scan.py --date today                     # partite di oggi, tutto il piano free
 python3 edge_scan.py --competitions SA,PL --days 2    # due giorni, Serie A + Premier
 python3 edge_scan.py --min-edge 3 --csv edge.csv      # solo edge >= 3%, esporta in CSV
 python3 edge_scan.py --bookmakers bet365,pinnacle     # limita i bookmaker interrogati
@@ -174,6 +185,11 @@ python3 edge_scan.py --bookmakers bet365,pinnacle     # limita i bookmaker inter
 Nessuna dipendenza esterna: solo la libreria standard di Python 3.9+.
 
 Codici competizione: `SA PL BL1 PD FL1 DED PPL CL ELC SB BL2 SD FL2` (oppure `all`).
+Senza `--competitions`, gira su tutte e nove le competizioni del piano gratuito
+di football-data.org (le cinque principali più Eredivisie, Primeira Liga,
+Champions League e Championship inglese); le quattro seconde divisioni a
+pagamento (Serie B, 2. Bundesliga, LaLiga2, Ligue 2) restano fuori dal default
+e vanno chieste esplicitamente, con `--competitions all` o elencandole.
 
 ## Come funziona
 
