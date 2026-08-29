@@ -71,6 +71,27 @@ COUNTRY_ALIASES: Dict[str, List[str]] = {
     "europe": ["uefa", "europe", "european", "champions"],
 }
 
+#: token che, se presenti in un campionato del provider ma non nel nostro
+#: nome, indicano che NON e' la stessa competizione. Una corrispondenza
+#: sbagliata qui non da' errore: analizza in silenzio il campionato sbagliato.
+DISQUALIFYING_TOKENS = {
+    # mercati derivati, non campionati
+    "offside", "offsides", "corner", "corners", "card", "cards", "booking",
+    "bookings", "shot", "shots", "minute", "minutes", "total", "totals",
+    "player", "players", "prop", "props", "special", "specials", "outright",
+    "outrights", "winner", "halftime", "half", "handicap", "score",
+    # competizioni diverse
+    "women", "womens", "ladies", "femminile", "feminine", "feminina",
+    "u23", "u21", "u20", "u19", "u18", "u17", "u16", "youth", "junior",
+    "juniors", "reserve", "reserves", "amateur", "futsal", "beach", "esports",
+    "cup", "coppa", "copa", "pokal", "trophy", "supercup", "supercoppa",
+    "playoff", "playoffs", "qualification", "qualifying", "friendly",
+    "friendlies", "preseason", "relegation", "promotion",
+    # ritagli regionali
+    "southern", "northern", "eastern", "western", "north", "south", "east",
+    "west", "central", "regional",
+}
+
 #: paesi usati per penalizzare gli omonimi ("Serie A" esiste in Italia e in
 #: Brasile, "Premier League" in mezza Europa).
 COUNTRY_HINTS = [

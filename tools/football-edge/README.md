@@ -100,12 +100,31 @@ richiesta e lo segnala nel riepilogo, così l'analisi non si ferma per un
 trattino. Conviene comunque correggere il file, per risparmiare una richiesta
 a ogni esecuzione.
 
-`--list-leagues` scarica l'elenco completo, lo filtra per sport (`--sport`,
-default `soccer`) e per ogni campionato mostra i tre candidati migliori con un
-punteggio, disambiguando gli omonimi: "Serie A" esiste anche in Brasile,
-"Premier League" anche in Russia, e il paese sposta il punteggio. Propone solo
-le corrispondenze sopra 0.80 e segnala a parte quelle da controllare a mano;
-`--leagues-all` stampa l'elenco completo per cercare il codice da sé.
+`--list-leagues` scarica l'elenco completo (circa 950 campionati di calcio), lo
+filtra per sport (`--sport`, default `soccer`) e per ogni campionato mostra i
+tre candidati migliori con un punteggio.
+
+La disambiguazione è la parte delicata, perché in quell'elenco convivono voci
+che somigliano moltissimo a quella cercata:
+
+- **omonimi di altri paesi** — "Serie A" esiste anche in Brasile
+- **mercati derivati** — `italy_serie_a_-_offside`, `france_ligue_1_-_total_corner_total_goal`
+- **altre competizioni** — versioni femminili, giovanili, ritagli regionali
+  come `england_-_southern_premier_league_south`
+- **la stessa lega con e senza paese** — `premier_league` e `england_-_premier_league`
+- **divisioni diverse** — `germany_-_bundesliga` e `germany_-_bundesliga_2`
+
+Il punteggio somma la somiglianza del nome, un bonus se compare il nostro paese
+e una penalità se ne compare un altro; scarta le voci che contengono parole
+estranee al campionato cercato (mercati, femminile, giovanili, regionali) e
+confronta il numero di divisione **nei due sensi**, perché "Bundesliga" non è
+"Bundesliga 2" ma nemmeno "2. Bundesliga" è "Bundesliga".
+
+Una corrispondenza viene proposta da sola solo se è buona in assoluto **e**
+nettamente staccata dalla seconda: fra `premier_league` ed
+`england_-_premier_league` il punteggio alto ce l'hanno entrambe, ed è il
+distacco a dire se la scelta è univoca. Le ambigue sono elencate a parte col
+motivo; `--leagues-all` stampa l'elenco completo per cercare a mano.
 
 Se qualcosa non torna, questi parametri coprono le varianti più probabili senza
 toccare il codice:

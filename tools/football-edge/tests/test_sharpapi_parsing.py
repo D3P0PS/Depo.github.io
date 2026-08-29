@@ -164,51 +164,74 @@ class SharpApiParsingTest(unittest.TestCase):
         self.assertIn("home_team", text)
 
 
-# Forma reale di /api/v1/leagues, osservata sulla risposta del provider.
+# Forma reale di /api/v1/leagues, con la convenzione di nomi osservata sul
+# provider: "paese_-_campionato", accanto a mercati derivati e competizioni
+# omonime che somigliano moltissimo al campionato cercato.
 LEAGUES_PAYLOAD = {
     "data": [
-        {"id": "nfl", "display_name": "NFL", "numerical_id": 376,
-         "sport": "football", "event_count": 1449, "live_count": 0},
+        {"id": "nfl", "display_name": "NFL", "sport": "football",
+         "event_count": 1449},
+        {"id": "italy_-_serie_a", "display_name": "Italy - Serie A",
+         "sport": "soccer", "event_count": 133},
         {"id": "serie_a", "display_name": "Serie A", "sport": "soccer",
-         "event_count": 380},
-        {"id": "brazil_serie_a", "display_name": "Brazil Serie A",
-         "sport": "soccer", "event_count": 380},
-        {"id": "serie_b", "display_name": "Serie B", "sport": "soccer",
-         "event_count": 380},
-        {"id": "epl", "display_name": "English Premier League",
-         "sport": "soccer", "event_count": 380},
-        {"id": "russia_premier_league", "display_name": "Russia Premier League",
-         "sport": "soccer", "event_count": 240},
-        {"id": "efl_championship", "display_name": "EFL Championship",
-         "sport": "soccer", "event_count": 552},
-        {"id": "bundesliga", "display_name": "Bundesliga", "sport": "soccer",
-         "event_count": 306},
-        {"id": "bundesliga_2", "display_name": "2. Bundesliga",
-         "sport": "soccer", "event_count": 306},
-        {"id": "laliga", "display_name": "LaLiga", "sport": "soccer",
-         "event_count": 380},
-        {"id": "laliga_2", "display_name": "LaLiga 2", "sport": "soccer",
-         "event_count": 462},
+         "event_count": 20},
+        {"id": "italy_serie_a_-_offside", "display_name": "Italy Serie A - Offside",
+         "sport": "soccer", "event_count": 4},
+        {"id": "italy_-_serie_a_women", "display_name": "Italy - Serie A Women",
+         "sport": "soccer", "event_count": 12},
+        {"id": "italy_-_serie_b", "display_name": "Italy - Serie B",
+         "sport": "soccer", "event_count": 90},
+        {"id": "premier_league", "display_name": "Premier League",
+         "sport": "soccer", "event_count": 140},
+        {"id": "england_-_premier_league",
+         "display_name": "England - Premier League", "sport": "soccer",
+         "event_count": 120},
+        {"id": "england_-_southern_premier_league_south",
+         "display_name": "England - Southern Premier League South",
+         "sport": "soccer", "event_count": 20},
+        {"id": "england_-_championship", "display_name": "England - Championship",
+         "sport": "soccer", "event_count": 180},
+        {"id": "germany_-_bundesliga", "display_name": "Germany - Bundesliga",
+         "sport": "soccer", "event_count": 72},
+        {"id": "germany_bundesliga_i", "display_name": "Germany Bundesliga I",
+         "sport": "soccer", "event_count": 49},
+        {"id": "germany_-_bundesliga_2", "display_name": "Germany - Bundesliga 2",
+         "sport": "soccer", "event_count": 29},
+        {"id": "spain_-_laliga", "display_name": "Spain - Laliga",
+         "sport": "soccer", "event_count": 8},
+        {"id": "spain_-_laliga_2", "display_name": "Spain - Laliga 2",
+         "sport": "soccer", "event_count": 40},
+        {"id": "spain_primera_laliga_-_offside",
+         "display_name": "Spain Primera Laliga - Offside", "sport": "soccer",
+         "event_count": 3},
+        {"id": "france_-_ligue_1", "display_name": "France - Ligue 1",
+         "sport": "soccer", "event_count": 122},
         {"id": "ligue_1", "display_name": "Ligue 1", "sport": "soccer",
-         "event_count": 306},
-        {"id": "ligue_2", "display_name": "Ligue 2", "sport": "soccer",
-         "event_count": 380},
-        {"id": "eredivisie", "display_name": "Eredivisie", "sport": "soccer",
-         "event_count": 306},
-        {"id": "primeira_liga", "display_name": "Primeira Liga",
-         "sport": "soccer", "event_count": 306},
-        {"id": "ucl", "display_name": "UEFA Champions League",
-         "sport": "soccer", "event_count": 189},
+         "event_count": 19},
+        {"id": "france_-_ligue_2", "display_name": "France - Ligue 2",
+         "sport": "soccer", "event_count": 60},
+        {"id": "netherlands_-_eredivisie", "display_name": "Netherlands - Eredivisie",
+         "sport": "soccer", "event_count": 55},
+        {"id": "portugal_-_primeira_liga", "display_name": "Portugal - Primeira Liga",
+         "sport": "soccer", "event_count": 48},
+        {"id": "uefa_-_champions_league", "display_name": "UEFA - Champions League",
+         "sport": "soccer", "event_count": 64},
+        {"id": "uefa_-_champions_league_qualification",
+         "display_name": "UEFA - Champions League Qualification",
+         "sport": "soccer", "event_count": 30},
     ],
     "updated_at": "2026-08-29T12:59:18.813568864Z",
 }
 
 #: cosa deve uscire per ciascun campionato che ci interessa
 EXPECTED = {
-    "SA": "serie_a", "PL": "epl", "BL1": "bundesliga", "PD": "laliga",
-    "FL1": "ligue_1", "DED": "eredivisie", "PPL": "primeira_liga", "CL": "ucl",
-    "ELC": "efl_championship", "SB": "serie_b", "BL2": "bundesliga_2",
-    "SD": "laliga_2", "FL2": "ligue_2",
+    "SA": "italy_-_serie_a", "PL": "england_-_premier_league",
+    "BL1": "germany_-_bundesliga", "PD": "spain_-_laliga",
+    "FL1": "france_-_ligue_1", "DED": "netherlands_-_eredivisie",
+    "PPL": "portugal_-_primeira_liga", "CL": "uefa_-_champions_league",
+    "ELC": "england_-_championship", "SB": "italy_-_serie_b",
+    "BL2": "germany_-_bundesliga_2", "SD": "spain_-_laliga_2",
+    "FL2": "france_-_ligue_2",
 }
 
 
@@ -234,11 +257,41 @@ class LeagueMatchingTest(unittest.TestCase):
             self.assertEqual(best["id"], expected, f"{code}: atteso {expected}")
             self.assertGreaterEqual(score, 0.80, f"{code}: punteggio troppo basso")
 
+    def test_derivative_markets_are_not_proposed(self) -> None:
+        """'Italy Serie A - Offside' non e' la Serie A: e' un mercato."""
+        from fbedge.config import COMPETITIONS
+        from fbedge.matching import league_candidates
+        comp = COMPETITIONS["SA"]
+        ranked = league_candidates(comp.short_name, comp.country, self.leagues, limit=99)
+        ids = [r["id"] for _s, r in ranked]
+        for market in ("italy_serie_a_-_offside", "italy_-_serie_a_women"):
+            self.assertLess(ids.index(EXPECTED["SA"]), ids.index(market))
+            score = next(s for s, r in ranked if r["id"] == market)
+            self.assertLess(score, 0.80, market)
+
+    def test_country_prefix_wins_over_bare_name(self) -> None:
+        """Il bonus del paese deve poter distinguere due nomi identici."""
+        from fbedge.config import COMPETITIONS
+        from fbedge.matching import league_candidates
+        comp = COMPETITIONS["PL"]
+        ranked = league_candidates(comp.short_name, comp.country, self.leagues, limit=2)
+        self.assertEqual(ranked[0][1]["id"], "england_-_premier_league")
+        self.assertGreater(ranked[0][0], ranked[1][0])   # niente pareggio a 1.00
+
+    def test_division_number_is_compared_both_ways(self) -> None:
+        from fbedge.config import COMPETITIONS
+        from fbedge.matching import league_candidates
+        for code in ("BL1", "BL2"):
+            comp = COMPETITIONS[code]
+            best = league_candidates(comp.short_name, comp.country, self.leagues)[0]
+            self.assertEqual(best[1]["id"], EXPECTED[code], code)
+
     def test_homonyms_from_other_countries_are_ranked_below(self) -> None:
         from fbedge.config import COMPETITIONS
         from fbedge.matching import league_candidates
         # "Serie A" esiste anche in Brasile, "Premier League" anche in Russia
-        for code, intruder in (("SA", "brazil_serie_a"), ("PL", "russia_premier_league")):
+        for code, intruder in (("SA", "serie_a"),
+                               ("PL", "england_-_southern_premier_league_south")):
             comp = COMPETITIONS[code]
             ranked = league_candidates(comp.short_name, comp.country, self.leagues, limit=99)
             ids = [r["id"] for _s, r in ranked]
@@ -248,11 +301,11 @@ class LeagueMatchingTest(unittest.TestCase):
         parser = client()
         parser._get = lambda path, params, ttl: ("url", LEAGUES_PAYLOAD)  # type: ignore
         rows = parser.list_leagues(ttl=0, sport="soccer")
-        self.assertEqual(len(rows), 15)                    # l'NFL viene escluso
+        self.assertEqual(len(rows), 22)                    # l'NFL viene escluso
         self.assertNotIn("nfl", [r["id"] for r in rows])
-        serie_a = next(r for r in rows if r["id"] == "serie_a")
-        self.assertEqual(serie_a["name"], "Serie A")
-        self.assertEqual(serie_a["events"], 380)
+        serie_a = next(r for r in rows if r["id"] == "italy_-_serie_a")
+        self.assertEqual(serie_a["name"], "Italy - Serie A")
+        self.assertEqual(serie_a["events"], 133)
 
     def test_server_side_filter_is_re_verified_locally(self) -> None:
         # un provider che ignorasse ?sport=soccer restituirebbe anche l'NFL:
@@ -266,7 +319,7 @@ class LeagueMatchingTest(unittest.TestCase):
         parser = client()
         parser._get = lambda path, params, ttl: ("url", LEAGUES_PAYLOAD)  # type: ignore
         rows = parser.list_leagues(ttl=0, sport="pallanuoto")
-        self.assertEqual(len(rows), 16)   # nessun filtro applicabile: li mostra tutti
+        self.assertEqual(len(rows), 23)   # nessun filtro applicabile: li mostra tutti
 
 
 ERROR_BODY = (

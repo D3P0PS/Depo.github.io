@@ -376,8 +376,12 @@ def league_key_for(comp, provider: str, overrides: Dict[str, str]) -> str:
     return overrides.get(comp.code, comp.league_key(provider))
 
 
-#: sopra questo punteggio la corrispondenza si considera affidabile
+#: una corrispondenza si propone da sola solo se e' buona in assoluto E
+#: nettamente migliore della seconda: fra "Premier League" ed "England -
+#: Premier League" il punteggio alto ce l'hanno entrambe, ed e' il distacco a
+#: dire se la scelta e' univoca.
 CONFIDENT_LEAGUE_MATCH = 0.80
+CONFIDENT_LEAGUE_MARGIN = 0.15
 
 
 def cmd_list_leagues(args: argparse.Namespace, provider: str, key: str,
@@ -424,10 +428,13 @@ def cmd_list_leagues(args: argparse.Namespace, provider: str, key: str,
                   f"{str(row['name'])[:28]:30} {score:.2f}  "
                   f"{row.get('events', 0):>5} eventi{'   <--' if best else ''}")
         top_score, top_row = candidates[0]
-        if top_score >= CONFIDENT_LEAGUE_MATCH:
+        margin = top_score - candidates[1][0] if len(candidates) > 1 else top_score
+        if top_score >= CONFIDENT_LEAGUE_MATCH and margin >= CONFIDENT_LEAGUE_MARGIN:
             proposed[code] = str(top_row["id"])
         else:
-            uncertain.append(code)
+            motivo = ("punteggio basso" if top_score < CONFIDENT_LEAGUE_MATCH
+                      else f"scelta ambigua, distacco dal secondo solo {margin:.2f}")
+            uncertain.append(f"{code} ({motivo})")
         print()
 
     blob = json.dumps(proposed, indent=2, ensure_ascii=False)

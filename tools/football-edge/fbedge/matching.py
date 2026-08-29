@@ -13,7 +13,13 @@ import re
 import unicodedata
 from typing import Dict, List, Optional, Tuple
 
-from .config import COUNTRY_ALIASES, COUNTRY_HINTS, NOISE_TOKENS, TEAM_ALIASES
+from .config import (
+    COUNTRY_ALIASES,
+    COUNTRY_HINTS,
+    DISQUALIFYING_TOKENS,
+    NOISE_TOKENS,
+    TEAM_ALIASES,
+)
 from .football_data import Fixture
 from .odds_api import OddsEvent
 
@@ -104,6 +110,25 @@ def outcome_role(
 
 
 # --------------------------------------------------------- campionati
+#: numeri di divisione scritti in cifre o in numeri romani
+ROMAN_DIVISIONS = {"i": "1", "ii": "2", "iii": "3"}
+
+
+def _tokens(text: str) -> set:
+    return {t for t in re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split() if t}
+
+
+def _division_numbers(tokens: set) -> set:
+    """Numeri di divisione presenti, normalizzati: 'ii' e '2' sono lo stesso."""
+    out = set()
+    for token in tokens:
+        if token.isdigit() and len(token) <= 2:
+            out.add(token.lstrip("0") or "0")
+        elif token in ROMAN_DIVISIONS:
+            out.add(ROMAN_DIVISIONS[token])
+    return out
+
+
 def league_candidates(
     short_name: str,
     country: str,
@@ -112,25 +137,41 @@ def league_candidates(
 ) -> List[Tuple[float, Dict[str, object]]]:
     """Classifica i campionati di un provider rispetto a uno dei nostri.
 
-    Il nome da solo non basta: "Serie A" esiste in Italia e in Brasile,
-    "Premier League" in mezza Europa. Il paese, quando compare nell'id o nel
-    nome del provider, sposta il punteggio; un paese diverso dal nostro lo
-    abbassa.
+    Il nome da solo non basta. "Serie A" esiste in Italia e in Brasile, e in un
+    elenco di quasi mille voci convivono il campionato vero, i suoi mercati
+    derivati ("Italy Serie A - Offside"), la versione femminile, quella
+    giovanile e i ritagli regionali. Tutti somigliano al nome cercato.
+
+    Il punteggio NON viene limitato a 1.0: il bonus del paese deve poter
+    distinguere fra due candidati che sul solo nome sono identici, come
+    "Premier League" ed "England - Premier League".
     """
     country_key = (country or "").strip().lower()
+    aliases = COUNTRY_ALIASES.get(country_key, [country_key] if country_key else [])
+    nostri = _tokens(short_name) | _tokens(country) | set(aliases)
+
     scored: List[Tuple[float, Dict[str, object]]] = []
     for row in leagues:
-        blob = f"{row.get('id', '')} {row.get('name', '')}".lower()
-        score = name_similarity(short_name, str(row.get("name", "")))
-        score = max(score, name_similarity(short_name, str(row.get("id", ""))))
+        name, ident = str(row.get("name", "")), str(row.get("id", ""))
+        blob = f"{ident} {name}".lower()
+        score = max(name_similarity(short_name, name), name_similarity(short_name, ident))
 
-        aliases = COUNTRY_ALIASES.get(country_key, [country_key] if country_key else [])
         if any(alias and alias in blob for alias in aliases):
-            score += 0.30                       # nomina il nostro paese
+            score += 0.30                      # nomina il nostro paese
         elif any(hint in blob for hint in COUNTRY_HINTS):
-            score -= 0.30                       # ne nomina un altro
+            score -= 0.30                      # ne nomina un altro
 
-        scored.append((min(score, 1.0), row))
+        # parole in piu' rispetto a quello che cerchiamo
+        suoi = _tokens(name) | _tokens(ident)
+        if (suoi - nostri) & DISQUALIFYING_TOKENS:
+            score -= 1.00                      # altra competizione, non un sinonimo
+
+        # il numero di divisione va confrontato nei due sensi: "Bundesliga"
+        # non e' "Bundesliga 2", ma nemmeno "2. Bundesliga" e' "Bundesliga"
+        if _division_numbers(nostri) != _division_numbers(suoi):
+            score -= 0.35
+
+        scored.append((score, row))
 
     scored.sort(key=lambda item: (-item[0], -int(item[1].get("events", 0) or 0)))
     return scored[:limit]
