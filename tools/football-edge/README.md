@@ -212,7 +212,7 @@ Codici competizione: `SA PL BL1 PD FL1 DED PPL CL ELC SB BL2 SD FL2` (oppure `al
 | `--offline` | usa solo la cache locale, zero chiamate di rete |
 | `--width 200` | larghezza della tabella: di default si adatta al terminale, togliendo prima `BOOK`, poi `P.MKT`, poi l'intervallo. Edge, probabilità e affidabilità restano sempre |
 | `--html report.html` | salva una pagina HTML apribile nel browser, stesso contenuto della tabella da terminale |
-| `--open` | apre subito l'HTML nel browser di sistema (con `--html FILE` lo salva anche lì, altrimenti usa un file temporaneo) |
+| `--open` | apre subito l'HTML nel browser di sistema. **Solo per uso locale**: su una sessione remota (SSH, Termius) non c'è modo di far apparire un browser sul proprio dispositivo, e lo script lo rileva e stampa invece le istruzioni per scaricare il file (SFTP o `scp`) |
 | `--btts` | tenta anche il mercato BTTS (su The Odds API richiede un piano a pagamento; in caso di rifiuto degrada da solo) |
 | `--odds-provider` | `sharpapi`, `theoddsapi` o `auto` |
 
@@ -269,6 +269,28 @@ Stampato integralmente a ogni esecuzione, in sintesi:
   incorporano molte più informazioni di questo modello. Un edge sopra il 15%
   viene segnalato automaticamente come probabile problema di dati.
 
+## Vedere l'HTML da una sessione remota (SSH, Termius)
+
+`--open` lancia il browser sulla macchina che esegue lo script. Su una
+connessione remota quella macchina è il server, non il telefono o il computer
+da cui ti colleghi: aprire un browser lì non produce nulla di visibile. Lo
+script rileva la sessione remota e stampa le istruzioni al posto di tentare.
+
+Le due strade che funzionano davvero:
+
+1. **Scaricare il file** — la più semplice. Da Termius, apri il pannello SFTP
+   (l'icona della cartella) e scarica il file `.html` sul tuo dispositivo, poi
+   aprilo lì. Da un altro client SSH: `scp utente@server:/percorso/report.html .`
+2. **Servirlo in rete** — se la porta è raggiungibile (spesso richiede
+   aprirla nel firewall del server): `python3 -m http.server 8000 --directory
+   <cartella-del-file>` e poi apri `http://<indirizzo-del-server>:8000/report.html`
+   dal browser del tuo dispositivo. Interrompilo con Ctrl+C appena finito: per
+   tutto il tempo in cui resta attivo, chiunque raggiunga quella porta vede il
+   file.
+
+Senza `--html`, il file finisce comunque in una cartella dedicata (non `/tmp`
+condiviso), così anche servendola non si espone altro.
+
 ## Test
 
 ```bash
@@ -278,6 +300,7 @@ python3 -m tests.test_sharpapi_parsing   # parser SharpAPI su piu' forme di risp
 python3 -m tests.test_env_keys           # caricamento delle chiavi da .env
 python3 -m tests.test_diagnose           # diagnosi della risposta quote vuota
 python3 -m tests.test_calibration        # controllo di calibrazione e scomposizione
+python3 -m tests.test_open_headless      # --open su sessione remota (SSH/Termius)
 ```
 
 Il self-test verifica fra l'altro che la griglia dei punteggi sommi a 1, che le

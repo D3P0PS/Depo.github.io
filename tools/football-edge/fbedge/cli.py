@@ -6,6 +6,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import socket
 import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -212,6 +213,21 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 #: cartella dello script, dove si cerca un .env se non ne viene passato uno
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def is_headless_session() -> bool:
+    """Rileva una sessione senza schermo (SSH/Termius) in modo prudente.
+
+    Falsi negativi (dice "ha uno schermo" quando non e' cosi') sono accettabili:
+    nel peggiore dei casi webbrowser.open() fallisce in silenzio, cosa che
+    succedeva comunque prima. Falsi positivi andrebbero evitati: negherebbero
+    --open a chi lavora davvero in locale.
+    """
+    if os.name == "nt" or sys.platform == "darwin":
+        return False        # Windows e macOS hanno quasi sempre un desktop
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+        return True          # il segnale piu' diretto: sei entrato via SSH
+    return not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
 
 KEY_VARIABLES = [
     ("FOOTBALL_DATA_API_KEY", "dati storici (football-data.org)", True),
@@ -874,8 +890,11 @@ def run(args: argparse.Namespace) -> int:
     if html_path or args.open:
         import tempfile
         if not html_path:
-            fd, html_path = tempfile.mkstemp(prefix="football-edge-", suffix=".html")
-            os.close(fd)
+            # una cartella dedicata, non /tmp condiviso: se poi la si serve con
+            # http.server per vederla da un altro dispositivo, si espone solo
+            # questo file, non l'intero /tmp
+            run_dir = tempfile.mkdtemp(prefix="football-edge-")
+            html_path = os.path.join(run_dir, "report.html")
         page = render_html(
             shown, unpriced, calibration, stats, settings,
             date_from, date_to, codes,
@@ -883,10 +902,32 @@ def run(args: argparse.Namespace) -> int:
         )
         with open(html_path, "w", encoding="utf-8") as fh:
             fh.write(page)
-        print(f"HTML scritto in {html_path}")
+        abs_path = os.path.abspath(html_path)
+        print(f"HTML scritto in {abs_path}")
         if args.open:
-            import webbrowser
-            webbrowser.open(f"file://{os.path.abspath(html_path)}")
+            if is_headless_session():
+                print(
+                    "\n--open non serve qui: questa sessione non ha uno schermo "
+                    "collegato (es. Termius/SSH), quindi il browser si aprirebbe "
+                    "sul server, non sul tuo telefono o computer.\n"
+                    "Per vedere la pagina, scarica il file sul tuo dispositivo:\n"
+                    f"  scp {os.environ.get('USER', 'utente')}@"
+                    f"{socket.gethostname()}:{abs_path} .\n"
+                    "oppure aprilo dal pannello SFTP di Termius (l'icona della "
+                    "cartella): naviga fino al file ed aprilo da li'.\n"
+                    "Se preferisci vederla subito senza scaricarla, prova:\n"
+                    f"  python3 -m http.server 8000 --directory "
+                    f"{os.path.dirname(abs_path) or '.'}\n"
+                    "e apri http://<indirizzo-del-server>:8000/"
+                    f"{os.path.basename(abs_path)} dal browser del tuo dispositivo "
+                    "(serve che la porta sia raggiungibile: su un VPS spesso va "
+                    "aperta nel firewall)."
+                )
+            else:
+                import webbrowser
+                if not webbrowser.open(f"file://{abs_path}"):
+                    print(f"\nNessun browser trovato su questa macchina. Apri "
+                          f"manualmente: {abs_path}")
     return 0
 
 
