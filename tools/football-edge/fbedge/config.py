@@ -14,42 +14,75 @@ from typing import Dict, List, Optional
 @dataclass(frozen=True)
 class Competition:
     code: str               # codice football-data.org
-    name: str
+    name: str               # etichetta per l'output
+    short_name: str         # nome del campionato, per il matching coi provider
+    country: str            # paese, per disambiguare omonimie ("Serie A")
     odds_sport_key: str     # sport key di The Odds API
     free_tier: bool         # incluso nel piano free di football-data.org
     tier: int               # 1 = prima divisione, 2 = seconda divisione
-    #: codice del campionato lato SharpAPI. None = si riusa odds_sport_key,
-    #: che e' solo un'ipotesi: verificare con --list-leagues e correggere con
-    #: --league-map (file JSON {"SA": "codice-sharpapi", ...}).
+    #: id del campionato lato SharpAPI. None = da mappare: gli id di SharpAPI
+    #: sono slug propri (es. "nfl"), da scoprire con --list-leagues e passare
+    #: con --league-map.
     sharpapi_league: Optional[str] = None
 
-    def league_key(self, provider: str) -> str:
+    def league_key(self, provider: str) -> Optional[str]:
         if provider == "sharpapi":
-            return self.sharpapi_league or self.odds_sport_key
+            return self.sharpapi_league
         return self.odds_sport_key
+
+
+def _c(code, name, short_name, country, odds_key, free_tier, tier):
+    return Competition(code, name, short_name, country, odds_key, free_tier, tier)
 
 
 COMPETITIONS: Dict[str, Competition] = {
     c.code: c
     for c in [
         # --- prime divisioni (tutte nel piano free di football-data.org) ---
-        Competition("SA",   "Serie A (ITA)",        "soccer_italy_serie_a",         True,  1),
-        Competition("PL",   "Premier League (ENG)", "soccer_epl",                   True,  1),
-        Competition("BL1",  "Bundesliga (GER)",     "soccer_germany_bundesliga",    True,  1),
-        Competition("PD",   "La Liga (ESP)",        "soccer_spain_la_liga",         True,  1),
-        Competition("FL1",  "Ligue 1 (FRA)",        "soccer_france_ligue_one",      True,  1),
+        _c("SA",  "Serie A (ITA)",        "Serie A",        "Italy",       "soccer_italy_serie_a",          True, 1),
+        _c("PL",  "Premier League (ENG)", "Premier League", "England",     "soccer_epl",                    True, 1),
+        _c("BL1", "Bundesliga (GER)",     "Bundesliga",     "Germany",     "soccer_germany_bundesliga",     True, 1),
+        _c("PD",  "La Liga (ESP)",        "LaLiga",         "Spain",       "soccer_spain_la_liga",          True, 1),
+        _c("FL1", "Ligue 1 (FRA)",        "Ligue 1",        "France",      "soccer_france_ligue_one",       True, 1),
         # --- extra utili, sempre nel piano free ---
-        Competition("DED",  "Eredivisie (NED)",     "soccer_netherlands_eredivisie", True, 1),
-        Competition("PPL",  "Primeira Liga (POR)",  "soccer_portugal_primeira_liga", True, 1),
-        Competition("CL",   "Champions League",     "soccer_uefa_champs_league",    True,  1),
+        _c("DED", "Eredivisie (NED)",     "Eredivisie",     "Netherlands", "soccer_netherlands_eredivisie", True, 1),
+        _c("PPL", "Primeira Liga (POR)",  "Primeira Liga",  "Portugal",    "soccer_portugal_primeira_liga", True, 1),
+        _c("CL",  "Champions League",     "Champions League", "Europe",    "soccer_uefa_champs_league",     True, 1),
         # --- seconde divisioni ---
-        Competition("ELC",  "Championship (ENG)",   "soccer_efl_champ",             True,  2),
-        Competition("SB",   "Serie B (ITA)",        "soccer_italy_serie_b",         False, 2),
-        Competition("BL2",  "2. Bundesliga (GER)",  "soccer_germany_bundesliga2",   False, 2),
-        Competition("SD",   "LaLiga2 (ESP)",        "soccer_spain_segunda_division", False, 2),
-        Competition("FL2",  "Ligue 2 (FRA)",        "soccer_france_ligue_two",      False, 2),
+        _c("ELC", "Championship (ENG)",   "Championship",   "England",     "soccer_efl_champ",              True, 2),
+        _c("SB",  "Serie B (ITA)",        "Serie B",        "Italy",       "soccer_italy_serie_b",         False, 2),
+        _c("BL2", "2. Bundesliga (GER)",  "2. Bundesliga",  "Germany",     "soccer_germany_bundesliga2",   False, 2),
+        _c("SD",  "LaLiga2 (ESP)",        "LaLiga 2",       "Spain",       "soccer_spain_segunda_division", False, 2),
+        _c("FL2", "Ligue 2 (FRA)",        "Ligue 2",        "France",      "soccer_france_ligue_two",      False, 2),
     ]
 }
+
+#: come ogni paese puo' comparire nell'id o nel nome di un provider.
+#: Serve a riconoscere "English Premier League" come inglese e a scartare
+#: "Russia Premier League".
+COUNTRY_ALIASES: Dict[str, List[str]] = {
+    "italy": ["italy", "italia", "italian", "ita", "seriea"],
+    "england": ["england", "english", "britain", "british", "uk", "eng", "efl", "epl"],
+    "germany": ["germany", "german", "deutschland", "ger", "dfb"],
+    "spain": ["spain", "spanish", "espana", "esp"],
+    "france": ["france", "french", "fra"],
+    "netherlands": ["netherlands", "dutch", "holland", "ned", "nl"],
+    "portugal": ["portugal", "portuguese", "por"],
+    "europe": ["uefa", "europe", "european", "champions"],
+}
+
+#: paesi usati per penalizzare gli omonimi ("Serie A" esiste in Italia e in
+#: Brasile, "Premier League" in mezza Europa).
+COUNTRY_HINTS = [
+    "italy", "italia", "england", "english", "germany", "deutschland", "spain",
+    "espana", "france", "netherlands", "holland", "portugal", "brazil", "brasil",
+    "argentina", "usa", "united states", "mexico", "japan", "china", "korea",
+    "russia", "ukraine", "turkey", "greece", "belgium", "austria", "switzerland",
+    "scotland", "ireland", "denmark", "sweden", "norway", "finland", "poland",
+    "czech", "croatia", "serbia", "romania", "bulgaria", "israel", "egypt",
+    "australia", "india", "chile", "colombia", "peru", "uruguay", "paraguay",
+    "ecuador", "bolivia", "venezuela", "saudi", "qatar", "emirates", "morocco",
+]
 
 DEFAULT_COMPETITIONS: List[str] = ["SA", "PL", "BL1", "PD", "FL1"]
 

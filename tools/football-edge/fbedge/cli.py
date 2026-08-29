@@ -20,10 +20,11 @@ from .httpcache import (
     build_url,
     redact,
 )
-from .matching import match_fixtures
+from .matching import league_candidates, match_fixtures
 from .model import build_league_model
 from .odds_api import OddsApiClient
 from .odds_types import MARKET_BTTS, MARKET_H2H, MARKET_TOTALS
+from .sharpapi import LEAGUES_PATH
 from .sharpapi import DEFAULT_BASE as SHARP_BASE
 from .sharpapi import DEFAULT_ODDS_PATH as SHARP_ODDS_PATH
 from .sharpapi import SharpApiClient, summarize_structure
@@ -165,6 +166,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     sh.add_argument("--league-map", default=None,
                     help="file JSON {\"SA\": \"codice-del-provider\"} per "
                          "correggere i codici campionato")
+    sh.add_argument("--sport", default="soccer",
+                    help="sport da cui filtrare i campionati in --list-leagues")
+    sh.add_argument("--leagues-all", action="store_true",
+                    help="con --list-leagues, stampa anche l'elenco completo")
+    sh.add_argument("--leagues-out", metavar="FILE", default=None,
+                    help="con --list-leagues, scrive la mappa proposta su file")
+    sh.add_argument("--league", default=None,
+                    help="con --dump-odds, id campionato da interrogare "
+                         "direttamente, senza passare da --league-map")
     sh.add_argument("--list-leagues", action="store_true",
                     help="elenca i campionati come li chiama il provider ed esce")
     sh.add_argument("--dump-odds", action="store_true",
@@ -345,30 +355,74 @@ def league_key_for(comp, provider: str, overrides: Dict[str, str]) -> str:
     return overrides.get(comp.code, comp.league_key(provider))
 
 
+#: sopra questo punteggio la corrispondenza si considera affidabile
+CONFIDENT_LEAGUE_MATCH = 0.80
+
+
 def cmd_list_leagues(args: argparse.Namespace, provider: str, key: str,
-                     http: HttpClient, ttl: int) -> int:
-    """Elenca i campionati come li chiama il provider."""
-    if provider == "sharpapi":
-        client = build_odds_client(args, provider, key, http)
-        print(f"Endpoint di scoperta provati su {client.base}:\n")
-        for path, payload in client.discover_leagues(ttl):
-            print(f"--- {path} ---")
-            if isinstance(payload, str):
-                print(f"  {payload}\n")
-                continue
-            print(summarize_structure(payload))
-            print()
-        print("Metti i codici trovati in un file JSON e passalo con --league-map,\n"
-              'ad esempio: {"SA": "italy-serie-a", "PL": "england-premier-league"}')
+                     http: HttpClient, codes: List[str], ttl: int) -> int:
+    """Elenca i campionati del provider e propone la mappa dei codici."""
+    if provider != "sharpapi":
+        from .odds_api import BASE as ODDS_BASE
+        url = build_url(f"{ODDS_BASE}/sports", {"apiKey": key})
+        for sport in http.get(url, ttl=ttl).json():
+            if str(sport.get("key", "")).startswith("soccer"):
+                print(f"  {sport.get('key'):40} {sport.get('title')}")
         return 0
 
-    from .odds_api import BASE as ODDS_BASE
-    url = build_url(f"{ODDS_BASE}/sports", {"apiKey": key})
-    payload = http.get(url, ttl=ttl).json()
-    for sport in payload:
-        if str(sport.get("group", "")).lower().startswith("soccer") or \
-                str(sport.get("key", "")).startswith("soccer"):
-            print(f"  {sport.get('key'):40} {sport.get('title')}")
+    client = build_odds_client(args, provider, key, http)
+    leagues = client.list_leagues(ttl, sport=args.sport)
+    if not leagues:
+        print(f"Nessun campionato trovato per lo sport '{args.sport}'. "
+              "Provare un altro valore con --sport.")
+        return 1
+
+    print(f"{len(leagues)} campionati di '{args.sport}' su "
+          f"{client.base}{LEAGUES_PATH}\n")
+
+    if args.leagues_all:
+        for row in sorted(leagues, key=lambda r: -int(r.get("events", 0) or 0)):
+            print(f"  {row['id']:38} {str(row['name'])[:40]:42} "
+                  f"{row.get('events', 0)} eventi")
+        print()
+
+    proposed: Dict[str, str] = {}
+    uncertain: List[str] = []
+    print("Corrispondenze proposte (verificare prima di usarle):\n")
+    for code in codes:
+        comp = COMPETITIONS[code]
+        candidates = league_candidates(comp.short_name, comp.country, leagues)
+        print(f"  {code:4} {comp.name}")
+        if not candidates:
+            print("         nessun candidato trovato")
+            uncertain.append(code)
+            continue
+        for rank, (score, row) in enumerate(candidates, 1):
+            best = rank == 1 and score >= CONFIDENT_LEAGUE_MATCH
+            print(f"         {rank}. {str(row['id']):32} "
+                  f"{str(row['name'])[:28]:30} {score:.2f}  "
+                  f"{row.get('events', 0):>5} eventi{'   <--' if best else ''}")
+        top_score, top_row = candidates[0]
+        if top_score >= CONFIDENT_LEAGUE_MATCH:
+            proposed[code] = str(top_row["id"])
+        else:
+            uncertain.append(code)
+        print()
+
+    blob = json.dumps(proposed, indent=2, ensure_ascii=False)
+    if args.leagues_out:
+        with open(args.leagues_out, "w", encoding="utf-8") as fh:
+            fh.write(blob + "\n")
+        print(f"Mappa scritta in {args.leagues_out}. Usala con:\n"
+              f"  python3 edge_scan.py --league-map {args.leagues_out}\n")
+    else:
+        print("Mappa proposta (salvala in un file e passala con --league-map):\n")
+        print(blob + "\n")
+
+    if uncertain:
+        print("Da controllare a mano, il punteggio migliore era basso: "
+              + ", ".join(uncertain))
+        print("Cerca il codice giusto con --leagues-all e aggiungilo alla mappa.")
     return 0
 
 
@@ -376,7 +430,12 @@ def cmd_dump_odds(args: argparse.Namespace, provider: str, key: str, http: HttpC
                   codes: List[str], overrides: Dict[str, str], ttl: int) -> int:
     """Stampa la risposta grezza delle quote, per verificare la mappatura."""
     comp = COMPETITIONS[codes[0]]
-    league = league_key_for(comp, provider, overrides)
+    league = args.league or league_key_for(comp, provider, overrides)
+    if not league:
+        print(f"Nessun codice campionato per {comp.name} sul provider "
+              f"'{provider}'.\nScoprilo con --list-leagues, oppure passalo "
+              "direttamente: --dump-odds --league <id>", file=sys.stderr)
+        return 2
     markets = [MARKET_H2H, MARKET_TOTALS] + ([MARKET_BTTS] if args.btts else [])
     client = build_odds_client(args, provider, key, http)
     if provider == "sharpapi":
@@ -447,7 +506,8 @@ def run(args: argparse.Namespace) -> int:
         return 2
 
     if args.list_leagues:
-        return cmd_list_leagues(args, provider, odds_key, http, settings.cache_ttl_odds)
+        return cmd_list_leagues(args, provider, odds_key, http, codes,
+                                settings.cache_ttl_odds)
     if args.dump_odds:
         return cmd_dump_odds(args, provider, odds_key, http, codes, overrides,
                              settings.cache_ttl_odds)
@@ -490,12 +550,20 @@ def run(args: argparse.Namespace) -> int:
         league = build_league_model(code, history, settings, now)
 
         events = []
-        if odds_client:
+        # attenzione: `league` e' il modello statistico, `league_id` il codice
+        # del campionato lato provider. Nomi distinti apposta.
+        league_id = league_key_for(comp, provider, overrides)
+        if odds_client and not league_id:
+            api_notes.append(
+                f"[{code}] {comp.name}: nessun codice campionato per il provider "
+                f"'{provider}'. Scoprilo con --list-leagues e passalo con "
+                "--league-map; per ora restano le sole probabilita' di modello."
+            )
+        elif odds_client:
             markets = [MARKET_H2H, MARKET_TOTALS] + ([MARKET_BTTS] if args.btts else [])
             try:
                 result = odds_client.fetch(
-                    league_key_for(comp, provider, overrides),
-                    markets, settings.cache_ttl_odds,
+                    league_id, markets, settings.cache_ttl_odds,
                     bookmakers=args.bookmakers,
                 )
                 events = result.events

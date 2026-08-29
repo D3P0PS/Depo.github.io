@@ -162,9 +162,13 @@ class OfflinePipelineTest(unittest.TestCase):
 
         seed(
             build_url(f"{SHARP_BASE}{SHARP_PATH}",
-                      {"league": "soccer_italy_serie_a", "markets": "h2h,totals"}),
+                      {"league": "serie-a", "markets": "h2h,totals"}),
             {"data": _odds_payload(kickoff)},
         )
+        # SharpAPI usa id propri: senza mappa non sa quale campionato chiedere
+        self.league_map = os.path.join(self.cache_dir, "leghe.json")
+        with open(self.league_map, "w", encoding="utf-8") as fh:
+            json.dump({"SA": "serie-a"}, fh)
 
     def tearDown(self) -> None:
         shutil.rmtree(self.cache_dir, ignore_errors=True)
@@ -176,6 +180,7 @@ class OfflinePipelineTest(unittest.TestCase):
             "--offline", "--cache-dir", self.cache_dir,
             "--football-data-key", "TEST",
             "--odds-provider", "sharpapi", "--sharpapi-key", "TEST",
+            "--league-map", self.league_map,
             "--mc-draws", "100", "--json", json_path, *extra,
         ]
         buf = io.StringIO()
@@ -294,6 +299,24 @@ class SharpApiPipelineTest(OfflinePipelineTest):
             key = (row["partita"], row["selezione"])
             self.assertIn(key, reference)
             self.assertAlmostEqual(row["quota"], reference[key], places=6)
+
+    def test_without_league_map_it_explains_instead_of_failing_silently(self) -> None:
+        json_path = os.path.join(self.cache_dir, "senza-mappa.json")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = cli.main([
+                "--competitions", "SA", "--date", self.date.isoformat(),
+                "--offline", "--cache-dir", self.cache_dir,
+                "--football-data-key", "TEST",
+                "--odds-provider", "sharpapi", "--sharpapi-key", "TEST",
+                "--mc-draws", "50", "--json", json_path,
+            ])
+        out = buf.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("nessun codice campionato", out)
+        self.assertIn("--list-leagues", out)
+        # le probabilita' di modello restano comunque visibili
+        self.assertIn("Internazionale - Napoli", out)
 
     def test_min_edge_filter_keeps_rows_visible(self) -> None:
         self.skipTest("coperto dalla variante The Odds API")

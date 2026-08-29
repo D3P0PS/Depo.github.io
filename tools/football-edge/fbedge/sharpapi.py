@@ -37,7 +37,14 @@ from .odds_types import (
 
 DEFAULT_BASE = "https://api.sharpapi.io"
 DEFAULT_ODDS_PATH = "/api/v1/odds"
-LEAGUE_DISCOVERY_PATHS = ["/api/v1/leagues", "/api/v1/sports", "/api/v1/competitions"]
+LEAGUES_PATH = "/api/v1/leagues"
+SPORTS_PATH = "/api/v1/sports"
+
+# chiavi con cui SharpAPI descrive un campionato in /api/v1/leagues
+LEAGUE_ID_KEYS = ("id", "key", "slug", "league_id")
+LEAGUE_NAME_KEYS = ("display_name", "name", "title", "full_name")
+LEAGUE_SPORT_KEYS = ("sport", "sport_id", "sport_key", "category")
+LEAGUE_COUNT_KEYS = ("event_count", "events", "num_events", "event_total")
 
 # --- sinonimi accettati per ogni campo -------------------------------------
 EVENT_LIST_KEYS = ("data", "events", "odds", "results", "items")
@@ -175,17 +182,64 @@ class SharpApiClient:
         return url, resp.json()
 
     # ------------------------------------------------------------ scoperta
-    def discover_leagues(self, ttl: int) -> List[Tuple[str, Any]]:
-        """Prova gli endpoint plausibili di elenco campionati. Non solleva."""
-        found: List[Tuple[str, Any]] = []
-        for path in LEAGUE_DISCOVERY_PATHS:
-            try:
-                url, payload = self._get(path, {}, ttl)
-            except HttpError as exc:
-                found.append((path, f"non disponibile ({exc.status or 'errore rete'})"))
+    def list_leagues(self, ttl: int, sport: str = "soccer") -> List[Dict[str, Any]]:
+        """Elenco dei campionati, filtrato per sport.
+
+        Ritorna [{'id', 'name', 'sport', 'events'}]. Se il campo sport non
+        c'e', ripiega sull'elenco di id esposto da /api/v1/sports.
+        """
+        _url, payload = self._get(LEAGUES_PATH, {}, ttl)
+        rows: List[Dict[str, Any]] = []
+        for raw in _as_list(payload):
+            if not isinstance(raw, dict):
                 continue
-            found.append((path, payload))
-        return found
+            league_id = _first(raw, LEAGUE_ID_KEYS)
+            if not league_id:
+                continue
+            try:
+                events = int(_first(raw, LEAGUE_COUNT_KEYS) or 0)
+            except (TypeError, ValueError):
+                events = 0
+            rows.append({
+                "id": str(league_id),
+                "name": str(_first(raw, LEAGUE_NAME_KEYS) or league_id),
+                "sport": str(_first(raw, LEAGUE_SPORT_KEYS) or ""),
+                "events": events,
+            })
+        if not sport:
+            return rows
+
+        filtered = [r for r in rows if r["sport"].lower() == sport.lower()]
+        if not filtered:
+            ids = self.sport_league_ids(sport, ttl)
+            filtered = [r for r in rows if r["id"] in ids]
+        return filtered or rows
+
+    def sport_league_ids(self, sport: str, ttl: int) -> set:
+        """Id dei campionati di uno sport, letti da /api/v1/sports."""
+        try:
+            _url, payload = self._get(SPORTS_PATH, {}, ttl)
+        except HttpError:
+            return set()
+        for raw in _as_list(payload):
+            if not isinstance(raw, dict):
+                continue
+            name = str(_first(raw, ("id", "key", "name")) or "").lower()
+            if name != sport.lower():
+                continue
+            leagues = raw.get("leagues")
+            if isinstance(leagues, list):
+                return {
+                    str(item if not isinstance(item, dict)
+                        else _first(item, LEAGUE_ID_KEYS))
+                    for item in leagues
+                }
+        return set()
+
+    def probe_raw(self, path: str, ttl: int) -> Any:
+        """Risposta grezza di un endpoint qualsiasi, per ispezione manuale."""
+        _url, payload = self._get(path, {}, ttl)
+        return payload
 
     def dump_raw(self, league_key: str, markets: List[str], ttl: int) -> Tuple[str, Any]:
         return self._get(

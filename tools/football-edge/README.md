@@ -74,22 +74,26 @@ informazione accetta più nomi plausibili (`price` / `odds` / `decimal_odds`,
 sia americane, e non solleva eccezioni sui campi che non conosce — li elenca fra
 le note dell'output.
 
-Due comandi per verificarla sui dati reali, prima di fidarsi dei numeri:
+SharpAPI usa id di campionato propri (slug corti tipo `nfl`, `serie-a`), non i
+codici di The Odds API: vanno scoperti e mappati una volta sola.
 
 ```bash
-# 1. come SharpAPI chiama i campionati
-python3 edge_scan.py --odds-provider sharpapi --list-leagues
+# 1. propone la mappa confrontando i nostri campionati con i loro
+python3 edge_scan.py --odds-provider sharpapi --list-leagues --leagues-out leghe.json
 
-# 2. forma della risposta e campi riconosciuti
-python3 edge_scan.py --odds-provider sharpapi --dump-odds --competitions SA
+# 2. forma della risposta quote, per verificare la mappatura dei campi
+python3 edge_scan.py --odds-provider sharpapi --dump-odds --league serie-a
+
+# 3. da qui in poi, ogni esecuzione
+python3 edge_scan.py --league-map leghe.json --date today
 ```
 
-I codici campionato trovati vanno messi in un file JSON e passati con
-`--league-map`:
-
-```json
-{"SA": "italy-serie-a", "PL": "england-premier-league"}
-```
+`--list-leagues` scarica l'elenco completo, lo filtra per sport (`--sport`,
+default `soccer`) e per ogni campionato mostra i tre candidati migliori con un
+punteggio, disambiguando gli omonimi: "Serie A" esiste anche in Brasile,
+"Premier League" anche in Russia, e il paese sposta il punteggio. Propone solo
+le corrispondenze sopra 0.80 e segnala a parte quelle da controllare a mano;
+`--leagues-all` stampa l'elenco completo per cercare il codice da sé.
 
 Se qualcosa non torna, questi parametri coprono le varianti più probabili senza
 toccare il codice:

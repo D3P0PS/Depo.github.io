@@ -13,7 +13,7 @@ import re
 import unicodedata
 from typing import Dict, List, Optional, Tuple
 
-from .config import NOISE_TOKENS, TEAM_ALIASES
+from .config import COUNTRY_ALIASES, COUNTRY_HINTS, NOISE_TOKENS, TEAM_ALIASES
 from .football_data import Fixture
 from .odds_api import OddsEvent
 
@@ -101,3 +101,36 @@ def outcome_role(
     if max(s_home, s_away) < threshold:
         return None
     return "home" if s_home >= s_away else "away"
+
+
+# --------------------------------------------------------- campionati
+def league_candidates(
+    short_name: str,
+    country: str,
+    leagues: List[Dict[str, object]],
+    limit: int = 3,
+) -> List[Tuple[float, Dict[str, object]]]:
+    """Classifica i campionati di un provider rispetto a uno dei nostri.
+
+    Il nome da solo non basta: "Serie A" esiste in Italia e in Brasile,
+    "Premier League" in mezza Europa. Il paese, quando compare nell'id o nel
+    nome del provider, sposta il punteggio; un paese diverso dal nostro lo
+    abbassa.
+    """
+    country_key = (country or "").strip().lower()
+    scored: List[Tuple[float, Dict[str, object]]] = []
+    for row in leagues:
+        blob = f"{row.get('id', '')} {row.get('name', '')}".lower()
+        score = name_similarity(short_name, str(row.get("name", "")))
+        score = max(score, name_similarity(short_name, str(row.get("id", ""))))
+
+        aliases = COUNTRY_ALIASES.get(country_key, [country_key] if country_key else [])
+        if any(alias and alias in blob for alias in aliases):
+            score += 0.30                       # nomina il nostro paese
+        elif any(hint in blob for hint in COUNTRY_HINTS):
+            score -= 0.30                       # ne nomina un altro
+
+        scored.append((min(score, 1.0), row))
+
+    scored.sort(key=lambda item: (-item[0], -int(item[1].get("events", 0) or 0)))
+    return scored[:limit]

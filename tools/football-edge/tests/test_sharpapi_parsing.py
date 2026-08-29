@@ -163,5 +163,102 @@ class SharpApiParsingTest(unittest.TestCase):
         self.assertIn("home_team", text)
 
 
+# Forma reale di /api/v1/leagues, osservata sulla risposta del provider.
+LEAGUES_PAYLOAD = {
+    "data": [
+        {"id": "nfl", "display_name": "NFL", "numerical_id": 376,
+         "sport": "football", "event_count": 1449, "live_count": 0},
+        {"id": "serie-a", "display_name": "Serie A", "sport": "soccer",
+         "event_count": 380},
+        {"id": "brazil-serie-a", "display_name": "Brazil Serie A",
+         "sport": "soccer", "event_count": 380},
+        {"id": "serie-b", "display_name": "Serie B", "sport": "soccer",
+         "event_count": 380},
+        {"id": "epl", "display_name": "English Premier League",
+         "sport": "soccer", "event_count": 380},
+        {"id": "russia-premier-league", "display_name": "Russia Premier League",
+         "sport": "soccer", "event_count": 240},
+        {"id": "efl-championship", "display_name": "EFL Championship",
+         "sport": "soccer", "event_count": 552},
+        {"id": "bundesliga", "display_name": "Bundesliga", "sport": "soccer",
+         "event_count": 306},
+        {"id": "bundesliga-2", "display_name": "2. Bundesliga",
+         "sport": "soccer", "event_count": 306},
+        {"id": "laliga", "display_name": "LaLiga", "sport": "soccer",
+         "event_count": 380},
+        {"id": "laliga-2", "display_name": "LaLiga 2", "sport": "soccer",
+         "event_count": 462},
+        {"id": "ligue-1", "display_name": "Ligue 1", "sport": "soccer",
+         "event_count": 306},
+        {"id": "ligue-2", "display_name": "Ligue 2", "sport": "soccer",
+         "event_count": 380},
+        {"id": "eredivisie", "display_name": "Eredivisie", "sport": "soccer",
+         "event_count": 306},
+        {"id": "primeira-liga", "display_name": "Primeira Liga",
+         "sport": "soccer", "event_count": 306},
+        {"id": "ucl", "display_name": "UEFA Champions League",
+         "sport": "soccer", "event_count": 189},
+    ],
+    "updated_at": "2026-08-29T12:59:18.813568864Z",
+}
+
+#: cosa deve uscire per ciascun campionato che ci interessa
+EXPECTED = {
+    "SA": "serie-a", "PL": "epl", "BL1": "bundesliga", "PD": "laliga",
+    "FL1": "ligue-1", "DED": "eredivisie", "PPL": "primeira-liga", "CL": "ucl",
+    "ELC": "efl-championship", "SB": "serie-b", "BL2": "bundesliga-2",
+    "SD": "laliga-2", "FL2": "ligue-2",
+}
+
+
+class LeagueMatchingTest(unittest.TestCase):
+    """Gli id SharpAPI sono slug propri: vanno indovinati fra centinaia."""
+
+    def setUp(self) -> None:
+        from fbedge.sharpapi import _as_list
+        self.leagues = [
+            {"id": r["id"], "name": r["display_name"], "sport": r["sport"],
+             "events": r.get("event_count", 0)}
+            for r in _as_list(LEAGUES_PAYLOAD) if r["sport"] == "soccer"
+        ]
+
+    def test_every_competition_matches_the_right_league(self) -> None:
+        from fbedge.config import COMPETITIONS
+        from fbedge.matching import league_candidates
+        for code, expected in EXPECTED.items():
+            comp = COMPETITIONS[code]
+            candidates = league_candidates(comp.short_name, comp.country, self.leagues)
+            self.assertTrue(candidates, code)
+            score, best = candidates[0]
+            self.assertEqual(best["id"], expected, f"{code}: atteso {expected}")
+            self.assertGreaterEqual(score, 0.80, f"{code}: punteggio troppo basso")
+
+    def test_homonyms_from_other_countries_are_ranked_below(self) -> None:
+        from fbedge.config import COMPETITIONS
+        from fbedge.matching import league_candidates
+        # "Serie A" esiste anche in Brasile, "Premier League" anche in Russia
+        for code, intruder in (("SA", "brazil-serie-a"), ("PL", "russia-premier-league")):
+            comp = COMPETITIONS[code]
+            ranked = league_candidates(comp.short_name, comp.country, self.leagues, limit=99)
+            ids = [r["id"] for _s, r in ranked]
+            self.assertLess(ids.index(EXPECTED[code]), ids.index(intruder), code)
+
+    def test_list_leagues_parses_the_real_envelope(self) -> None:
+        parser = client()
+        parser._get = lambda path, params, ttl: ("url", LEAGUES_PAYLOAD)  # type: ignore
+        rows = parser.list_leagues(ttl=0, sport="soccer")
+        self.assertEqual(len(rows), 15)                    # l'NFL viene escluso
+        self.assertNotIn("nfl", [r["id"] for r in rows])
+        serie_a = next(r for r in rows if r["id"] == "serie-a")
+        self.assertEqual(serie_a["name"], "Serie A")
+        self.assertEqual(serie_a["events"], 380)
+
+    def test_unknown_sport_falls_back_instead_of_returning_nothing(self) -> None:
+        parser = client()
+        parser._get = lambda path, params, ttl: ("url", LEAGUES_PAYLOAD)  # type: ignore
+        rows = parser.list_leagues(ttl=0, sport="pallanuoto")
+        self.assertEqual(len(rows), 16)   # nessun filtro applicabile: li mostra tutti
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
