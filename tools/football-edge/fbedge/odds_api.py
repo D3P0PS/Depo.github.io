@@ -8,54 +8,19 @@ nell'output, cosi' il budget resta visibile.
 
 from __future__ import annotations
 
-import datetime as dt
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from .httpcache import HttpClient, HttpError, build_url
+from .odds_types import (
+    MARKET_BTTS,
+    BookQuote,
+    OddsEvent,
+    OddsFetchResult,
+    Outcome,
+    parse_utc,
+)
 
 BASE = "https://api.the-odds-api.com/v4"
-
-MARKET_H2H = "h2h"
-MARKET_TOTALS = "totals"
-MARKET_BTTS = "btts"
-
-
-@dataclass(frozen=True)
-class Outcome:
-    name: str
-    price: float
-    point: Optional[float] = None
-
-
-@dataclass
-class BookQuote:
-    book_key: str
-    book_title: str
-    outcomes: List[Outcome]
-
-
-@dataclass
-class OddsEvent:
-    event_id: str
-    sport_key: str
-    commence_time: dt.datetime
-    home_team: str
-    away_team: str
-    # market_key -> lista di quotazioni per bookmaker
-    markets: Dict[str, List[BookQuote]] = field(default_factory=dict)
-
-
-@dataclass
-class OddsFetchResult:
-    events: List[OddsEvent] = field(default_factory=list)
-    requests_remaining: Optional[str] = None
-    requests_used: Optional[str] = None
-    notes: List[str] = field(default_factory=list)
-
-
-def _parse_utc(value: str) -> dt.datetime:
-    return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 class OddsApiClient:
@@ -129,7 +94,7 @@ class OddsApiClient:
         event = OddsEvent(
             event_id=raw.get("id", ""),
             sport_key=raw.get("sport_key", ""),
-            commence_time=_parse_utc(raw["commence_time"]),
+            commence_time=parse_utc(raw["commence_time"]),
             home_team=raw.get("home_team", ""),
             away_team=raw.get("away_team", ""),
         )

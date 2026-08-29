@@ -23,7 +23,7 @@ from .model import (
     market_probabilities,
     poisson_pmf,
 )
-from .odds_api import BookQuote, OddsEvent, Outcome
+from .odds_types import BookQuote, OddsEvent, Outcome
 from .report import SEPARATOR, render_footer, render_notes, render_table
 
 # Frasi che l'output non deve mai contenere: nessun esito e' presentato

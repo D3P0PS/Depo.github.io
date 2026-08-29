@@ -92,6 +92,7 @@ def render_header(
     competitions: Sequence[str],
     settings: Settings,
     generated_at: dt.datetime,
+    odds_provider: str = "",
 ) -> str:
     return "\n".join(
         [
@@ -101,6 +102,7 @@ def render_header(
             f"Generato il      : {generated_at:%Y-%m-%d %H:%M} UTC",
             f"Finestra partite : {day_from} -> {day_to}",
             f"Campionati       : {', '.join(competitions)}",
+            f"Fonte quote      : {odds_provider or 'n/d'}",
             f"Modello          : Poisson bivariato (lambda3={settings.lambda_cov:g}), "
             f"forma su {settings.form_matches} partite per split, "
             f"mezza vita {settings.half_life_days:g} giorni",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import sys
 from typing import Dict, List, Optional, Sequence
@@ -11,10 +12,20 @@ from typing import Dict, List, Optional, Sequence
 from .analysis import EdgeRow, RELIABILITY_OK, analyze_fixture
 from .config import COMPETITIONS, DEFAULT_COMPETITIONS, Settings
 from .football_data import FootballDataClient, current_season_start_year
-from .httpcache import DEFAULT_CACHE_DIR, HttpClient, HttpError, RateLimiter
+from .httpcache import (
+    DEFAULT_CACHE_DIR,
+    HttpClient,
+    HttpError,
+    RateLimiter,
+    build_url,
+)
 from .matching import match_fixtures
 from .model import build_league_model
-from .odds_api import MARKET_BTTS, MARKET_H2H, MARKET_TOTALS, OddsApiClient
+from .odds_api import OddsApiClient
+from .odds_types import MARKET_BTTS, MARKET_H2H, MARKET_TOTALS
+from .sharpapi import DEFAULT_BASE as SHARP_BASE
+from .sharpapi import DEFAULT_ODDS_PATH as SHARP_ODDS_PATH
+from .sharpapi import SharpApiClient, summarize_structure
 from .report import (
     SEPARATOR,
     render_footer,
@@ -26,18 +37,20 @@ from .report import (
 )
 
 KEYS_HELP = """\
-Servono due chiavi API gratuite:
+Serve una chiave per i dati storici e una per le quote.
 
-  1) football-data.org  -> https://www.football-data.org/client/register
-     Piano free: 10 richieste/minuto, prime divisioni europee + Championship.
+  1) Dati storici - football-data.org
+     https://www.football-data.org/client/register
      export FOOTBALL_DATA_API_KEY="la-tua-chiave"
 
-  2) The Odds API       -> https://the-odds-api.com/#get-access
-     Piano free: ~500 crediti/mese (1 credito per mercato x regione).
-     export ODDS_API_KEY="la-tua-chiave"
+  2) Quote - uno fra questi due provider (--odds-provider):
+     a) SharpAPI            export SHARPAPI_KEY="la-tua-chiave"
+     b) The Odds API        export ODDS_API_KEY="la-tua-chiave"
+     Se e' impostata una sola delle due chiavi, il provider viene scelto
+     automaticamente.
 
-In alternativa: --football-data-key / --odds-key, oppure un file con
-FOOTBALL_DATA_API_KEY=... e ODDS_API_KEY=... passato con --env-file.
+In alternativa: --football-data-key / --odds-key / --sharpapi-key, oppure un
+file con le variabili passato con --env-file.
 Senza chiave quote si puo' comunque usare --model-only (probabilita' del
 modello, nessun edge: senza quote reali l'edge non e' calcolabile).
 """
@@ -91,7 +104,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                    help="filtro opzionale: mostra solo le righe con edge stimato >= "
                         "questa soglia (%%). Senza filtro vengono mostrate anche le "
                         "righe con edge negativo, che sono la maggioranza")
-    k.add_argument("--regions", default="eu", help="regioni bookmaker (eu, uk, us, au)")
+    k.add_argument("--odds-provider", default="auto",
+                   choices=["auto", "sharpapi", "theoddsapi"],
+                   help="fonte delle quote. 'auto' sceglie in base alle chiavi presenti")
+    k.add_argument("--regions", default="eu",
+                   help="regioni bookmaker, solo The Odds API (eu, uk, us, au)")
     k.add_argument("--bookmakers", default=None,
                    help="lista di bookmaker specifici (es. bet365,pinnacle)")
     k.add_argument("--btts", action="store_true",
@@ -111,11 +128,34 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                    help="usa solo la cache locale, nessuna chiamata di rete")
     o.add_argument("--cache-dir", default=DEFAULT_CACHE_DIR)
     o.add_argument("--football-data-key", default=None)
-    o.add_argument("--odds-key", default=None)
+    o.add_argument("--odds-key", default=None, help="chiave The Odds API")
+    o.add_argument("--sharpapi-key", default=None, help="chiave SharpAPI")
     o.add_argument("--env-file", default=None, help="file con le variabili delle chiavi")
     o.add_argument("--verbose", action="store_true")
     o.add_argument("--self-test", action="store_true",
                    help="verifica il modello su dati sintetici, senza rete")
+
+    sh = p.add_argument_group(
+        "SharpAPI (mappatura dei campi ricostruita: verificare con --dump-odds)")
+    sh.add_argument("--sharpapi-base", default=SHARP_BASE, help="URL base")
+    sh.add_argument("--sharpapi-odds-path", default=SHARP_ODDS_PATH,
+                    help="percorso dell'endpoint quote")
+    sh.add_argument("--sharpapi-auth", default="bearer",
+                    choices=["bearer", "x-api-key", "query"],
+                    help="come viene inviata la chiave")
+    sh.add_argument("--sharpapi-league-param", default="league",
+                    help="nome del parametro con cui si filtra il campionato")
+    sh.add_argument("--sharpapi-odds-format", default="auto",
+                    choices=["auto", "decimal", "american"],
+                    help="formato delle quote restituite")
+    sh.add_argument("--league-map", default=None,
+                    help="file JSON {\"SA\": \"codice-del-provider\"} per "
+                         "correggere i codici campionato")
+    sh.add_argument("--list-leagues", action="store_true",
+                    help="elenca i campionati come li chiama il provider ed esce")
+    sh.add_argument("--dump-odds", action="store_true",
+                    help="stampa la risposta grezza delle quote e la sua struttura, "
+                         "per verificare la mappatura dei campi")
     return p.parse_args(argv)
 
 
@@ -161,21 +201,114 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
     )
 
 
+def resolve_provider(args: argparse.Namespace) -> tuple[str, str]:
+    """Sceglie il provider di quote. Ritorna (nome, chiave); ('', '') se assente."""
+    sharp_key = args.sharpapi_key or os.environ.get("SHARPAPI_KEY", "")
+    odds_key = args.odds_key or os.environ.get("ODDS_API_KEY", "")
+    choice = args.odds_provider
+    if choice == "sharpapi":
+        return ("sharpapi", sharp_key)
+    if choice == "theoddsapi":
+        return ("theoddsapi", odds_key)
+    if sharp_key:
+        return ("sharpapi", sharp_key)
+    if odds_key:
+        return ("theoddsapi", odds_key)
+    return ("", "")
+
+
+def build_odds_client(args: argparse.Namespace, provider: str, key: str, http: HttpClient):
+    if provider == "sharpapi":
+        return SharpApiClient(
+            key, http,
+            base=args.sharpapi_base,
+            odds_path=args.sharpapi_odds_path,
+            auth_style=args.sharpapi_auth,
+            league_param=args.sharpapi_league_param,
+            odds_format=args.sharpapi_odds_format,
+        )
+    return OddsApiClient(key, http, regions=args.regions)
+
+
+def load_league_map(path: Optional[str]) -> Dict[str, str]:
+    if not path:
+        return {}
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    return {str(k).upper(): str(v) for k, v in data.items()}
+
+
+def league_key_for(comp, provider: str, overrides: Dict[str, str]) -> str:
+    return overrides.get(comp.code, comp.league_key(provider))
+
+
+def cmd_list_leagues(args: argparse.Namespace, provider: str, key: str,
+                     http: HttpClient, ttl: int) -> int:
+    """Elenca i campionati come li chiama il provider."""
+    if provider == "sharpapi":
+        client = build_odds_client(args, provider, key, http)
+        print(f"Endpoint di scoperta provati su {client.base}:\n")
+        for path, payload in client.discover_leagues(ttl):
+            print(f"--- {path} ---")
+            if isinstance(payload, str):
+                print(f"  {payload}\n")
+                continue
+            print(summarize_structure(payload))
+            print()
+        print("Metti i codici trovati in un file JSON e passalo con --league-map,\n"
+              'ad esempio: {"SA": "italy-serie-a", "PL": "england-premier-league"}')
+        return 0
+
+    from .odds_api import BASE as ODDS_BASE
+    url = build_url(f"{ODDS_BASE}/sports", {"apiKey": key})
+    payload = http.get(url, ttl=ttl).json()
+    for sport in payload:
+        if str(sport.get("group", "")).lower().startswith("soccer") or \
+                str(sport.get("key", "")).startswith("soccer"):
+            print(f"  {sport.get('key'):40} {sport.get('title')}")
+    return 0
+
+
+def cmd_dump_odds(args: argparse.Namespace, provider: str, key: str, http: HttpClient,
+                  codes: List[str], overrides: Dict[str, str], ttl: int) -> int:
+    """Stampa la risposta grezza delle quote, per verificare la mappatura."""
+    comp = COMPETITIONS[codes[0]]
+    league = league_key_for(comp, provider, overrides)
+    markets = [MARKET_H2H, MARKET_TOTALS] + ([MARKET_BTTS] if args.btts else [])
+    client = build_odds_client(args, provider, key, http)
+    if provider == "sharpapi":
+        url, payload = client.dump_raw(league, markets, ttl)
+    else:
+        result = client.fetch(comp.odds_sport_key, markets, ttl)
+        url, payload = "(The Odds API)", [e.__dict__ for e in result.events[:2]]
+    print(f"Campionato richiesto : {comp.name} -> '{league}'")
+    print(f"URL                  : {url}\n")
+    print("--- struttura riconosciuta ---")
+    print(summarize_structure(payload))
+    print("\n--- primi 4000 caratteri del JSON grezzo ---")
+    print(json.dumps(payload, indent=2, ensure_ascii=False, default=str)[:4000])
+    return 0
+
+
 def run(args: argparse.Namespace) -> int:
     if args.env_file:
         load_env_file(args.env_file)
 
     fd_key = args.football_data_key or os.environ.get("FOOTBALL_DATA_API_KEY", "")
-    odds_key = args.odds_key or os.environ.get("ODDS_API_KEY", "")
+    provider, odds_key = resolve_provider(args)
 
-    if not fd_key:
+    if not fd_key and not (args.list_leagues or args.dump_odds):
         print("Manca la chiave di football-data.org: senza risultati storici il "
               "modello non puo' stimare nulla.\n", file=sys.stderr)
         print(KEYS_HELP, file=sys.stderr)
         return 2
     if not odds_key and not args.model_only:
-        print("Manca la chiave di The Odds API: senza quote reali l'edge non e' "
-              "calcolabile.\nUsa --model-only per le sole probabilita' del "
+        missing = {
+            "sharpapi": "SHARPAPI_KEY",
+            "theoddsapi": "ODDS_API_KEY",
+        }.get(provider, "SHARPAPI_KEY oppure ODDS_API_KEY")
+        print(f"Manca la chiave per le quote ({missing}): senza quote reali l'edge "
+              "non e' calcolabile.\nUsa --model-only per le sole probabilita' del "
               "modello, oppure imposta la chiave.\n", file=sys.stderr)
         print(KEYS_HELP, file=sys.stderr)
         return 2
@@ -201,9 +334,21 @@ def run(args: argparse.Namespace) -> int:
         rate_limiter=RateLimiter(10, 60.0),
         verbose=args.verbose,
     )
+    try:
+        overrides = load_league_map(args.league_map)
+    except (OSError, ValueError) as exc:
+        print(f"--league-map non leggibile: {exc}", file=sys.stderr)
+        return 2
+
+    if args.list_leagues:
+        return cmd_list_leagues(args, provider, odds_key, http, settings.cache_ttl_odds)
+    if args.dump_odds:
+        return cmd_dump_odds(args, provider, odds_key, http, codes, overrides,
+                             settings.cache_ttl_odds)
+
     fd = FootballDataClient(fd_key, http)
     odds_client = (
-        OddsApiClient(odds_key, http, regions=args.regions)
+        build_odds_client(args, provider, odds_key, http)
         if odds_key and not args.model_only
         else None
     )
@@ -243,7 +388,8 @@ def run(args: argparse.Namespace) -> int:
             markets = [MARKET_H2H, MARKET_TOTALS] + ([MARKET_BTTS] if args.btts else [])
             try:
                 result = odds_client.fetch(
-                    comp.odds_sport_key, markets, settings.cache_ttl_odds,
+                    league_key_for(comp, provider, overrides),
+                    markets, settings.cache_ttl_odds,
                     bookmakers=args.bookmakers,
                 )
                 events = result.events
@@ -286,7 +432,8 @@ def run(args: argparse.Namespace) -> int:
         "odds_requests_used": odds_client.requests_used if odds_client else None,
     }
 
-    print(render_header(date_from, date_to, codes, settings, now))
+    print(render_header(date_from, date_to, codes, settings, now,
+                        provider if odds_client else "nessuno (--model-only)"))
     if shown:
         print(render_table(shown, settings))
     else:

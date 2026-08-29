@@ -27,6 +27,8 @@ from fbedge import cli  # noqa: E402
 from fbedge.football_data import BASE as FD_BASE  # noqa: E402
 from fbedge.httpcache import HttpClient, Response, build_url  # noqa: E402
 from fbedge.odds_api import BASE as ODDS_BASE  # noqa: E402
+from fbedge.sharpapi import DEFAULT_BASE as SHARP_BASE  # noqa: E402
+from fbedge.sharpapi import DEFAULT_ODDS_PATH as SHARP_PATH  # noqa: E402
 
 TEAMS = [
     (100, "Internazionale"), (101, "Milan"), (102, "Juventus"), (103, "Napoli"),
@@ -158,8 +160,28 @@ class OfflinePipelineTest(unittest.TestCase):
             _odds_payload(kickoff),
         )
 
+        seed(
+            build_url(f"{SHARP_BASE}{SHARP_PATH}",
+                      {"league": "soccer_italy_serie_a", "markets": "h2h,totals"}),
+            {"data": _odds_payload(kickoff)},
+        )
+
     def tearDown(self) -> None:
         shutil.rmtree(self.cache_dir, ignore_errors=True)
+
+    def _run_sharpapi(self, *extra: str):
+        json_path = os.path.join(self.cache_dir, "sharp.json")
+        argv = [
+            "--competitions", "SA", "--date", self.date.isoformat(),
+            "--offline", "--cache-dir", self.cache_dir,
+            "--football-data-key", "TEST",
+            "--odds-provider", "sharpapi", "--sharpapi-key", "TEST",
+            "--mc-draws", "100", "--json", json_path, *extra,
+        ]
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = cli.main(argv)
+        return code, buf.getvalue(), json_path
 
     def _run(self, *extra: str):
         csv_path = os.path.join(self.cache_dir, "out.csv")
@@ -168,6 +190,7 @@ class OfflinePipelineTest(unittest.TestCase):
             "--competitions", "SA", "--date", self.date.isoformat(),
             "--offline", "--cache-dir", self.cache_dir,
             "--football-data-key", "TEST", "--odds-key", "TEST",
+            "--odds-provider", "theoddsapi",
             "--mc-draws", "150", "--csv", csv_path, "--json", json_path, *extra,
         ]
         buf = io.StringIO()
@@ -246,6 +269,37 @@ class OfflinePipelineTest(unittest.TestCase):
                                       pure[key]["prob_modello_pct"], places=3)
             checked += 1
         self.assertGreater(checked, 0)
+
+
+class SharpApiPipelineTest(OfflinePipelineTest):
+    """La stessa pipeline, ma con SharpAPI come fonte delle quote."""
+
+    def test_pipeline_end_to_end(self) -> None:
+        code, out, json_path = self._run_sharpapi()
+        self.assertEqual(code, 0, out)
+        self.assertIn("Fonte quote      : sharpapi", out)
+        self.assertIn("Internazionale - Napoli", out)
+        self.assertNotIn("nessun evento quote abbinato", out)
+        with open(json_path, encoding="utf-8") as fh:
+            rows = json.load(fh)["righe"]
+        quoted = [r for r in rows if r["quota"]]
+        self.assertTrue(quoted)
+        self.assertTrue(all(r["prob_mercato_equa_pct"] is not None for r in quoted))
+        # le stesse quote via i due provider devono dare lo stesso edge
+        _c, _o, _csv, other = self._run("--mc-draws", "100")
+        with open(other, encoding="utf-8") as fh:
+            reference = {(r["partita"], r["selezione"]): r["quota"]
+                         for r in json.load(fh)["righe"] if r["quota"]}
+        for row in quoted:
+            key = (row["partita"], row["selezione"])
+            self.assertIn(key, reference)
+            self.assertAlmostEqual(row["quota"], reference[key], places=6)
+
+    def test_min_edge_filter_keeps_rows_visible(self) -> None:
+        self.skipTest("coperto dalla variante The Odds API")
+
+    def test_market_blend_moves_towards_market(self) -> None:
+        self.skipTest("coperto dalla variante The Odds API")
 
 
 if __name__ == "__main__":

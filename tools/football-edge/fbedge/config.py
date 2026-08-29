@@ -18,6 +18,15 @@ class Competition:
     odds_sport_key: str     # sport key di The Odds API
     free_tier: bool         # incluso nel piano free di football-data.org
     tier: int               # 1 = prima divisione, 2 = seconda divisione
+    #: codice del campionato lato SharpAPI. None = si riusa odds_sport_key,
+    #: che e' solo un'ipotesi: verificare con --list-leagues e correggere con
+    #: --league-map (file JSON {"SA": "codice-sharpapi", ...}).
+    sharpapi_league: Optional[str] = None
+
+    def league_key(self, provider: str) -> str:
+        if provider == "sharpapi":
+            return self.sharpapi_league or self.odds_sport_key
+        return self.odds_sport_key
 
 
 COMPETITIONS: Dict[str, Competition] = {

@@ -12,7 +12,7 @@ from .devig import consensus_fair
 from .football_data import Fixture
 from .matching import outcome_role
 from .model import FixtureModel, LeagueModel, expected_goals, simulate_fixture
-from .odds_api import MARKET_BTTS, MARKET_H2H, MARKET_TOTALS, OddsEvent
+from .odds_types import MARKET_BTTS, MARKET_H2H, MARKET_TOTALS, OddsEvent
 
 # Oltre questa soglia un edge e' quasi sempre un problema di dati (quota
 # stantia, squadre abbinate male) piuttosto che un'occasione reale.

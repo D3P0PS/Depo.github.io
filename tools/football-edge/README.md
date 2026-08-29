@@ -12,10 +12,14 @@ modello vengono stampati a ogni esecuzione.
 
 Solo API pubbliche e documentate. Nessuno scraping di siti di bookmaker.
 
-| Fonte | Uso | Piano gratuito |
+| Fonte | Uso | Note |
 |---|---|---|
-| [football-data.org](https://www.football-data.org/) v4 | calendario, risultati, forma | 10 richieste/minuto, prime divisioni europee + Championship |
-| [The Odds API](https://the-odds-api.com/) v4 | quote 1X2, Over/Under, BTTS da più bookmaker (bet365 incluso nella regione `eu`) | ~500 crediti/mese |
+| [football-data.org](https://www.football-data.org/) v4 | calendario, risultati, forma | piano free: 10 richieste/minuto, prime divisioni europee + Championship |
+| [SharpAPI](https://sharpapi.io/) v1 | quote da più sportsbook | provider di default se è impostata `SHARPAPI_KEY`. **Mappatura dei campi da verificare**, vedi sotto |
+| [The Odds API](https://the-odds-api.com/) v4 | quote 1X2, Over/Under, BTTS da più bookmaker (bet365 incluso nella regione `eu`) | piano free: ~500 crediti/mese |
+
+Il provider delle quote si sceglie con `--odds-provider`; con `auto` (default)
+viene usato SharpAPI se è presente `SHARPAPI_KEY`, altrimenti The Odds API.
 
 Le seconde divisioni (Serie B, 2. Bundesliga, LaLiga2, Ligue 2) non sono nel
 piano gratuito di football-data.org: vengono tentate e, in caso di `403`,
@@ -27,13 +31,62 @@ Entrambe gratuite, registrazione in un minuto:
 
 ```bash
 export FOOTBALL_DATA_API_KEY="..."   # https://www.football-data.org/client/register
+export SHARPAPI_KEY="..."            # https://sharpapi.io/   (provider quote)
+# oppure, in alternativa a SharpAPI:
 export ODDS_API_KEY="..."            # https://the-odds-api.com/#get-access
 ```
 
-In alternativa `--football-data-key` / `--odds-key`, oppure un file passato con
-`--env-file`. Senza chiave quote si può usare `--model-only`: si ottengono le
-probabilità del modello, ma nessun edge (senza quote non c'è niente con cui
-confrontarsi).
+In alternativa `--football-data-key` / `--sharpapi-key` / `--odds-key`, oppure
+un file passato con `--env-file`. Senza chiave quote si può usare
+`--model-only`: si ottengono le probabilità del modello, ma nessun edge (senza
+quote non c'è niente con cui confrontarsi).
+
+## SharpAPI: mappatura da verificare al primo avvio
+
+L'adattatore SharpAPI è stato scritto **senza accesso alla documentazione**
+(`sharpapi.io` e `docs.sharpapi.io` erano bloccati dalla policy di rete
+dell'ambiente di sviluppo). Il parser è quindi volutamente tollerante: per ogni
+informazione accetta più nomi plausibili (`price` / `odds` / `decimal_odds`,
+`commence_time` / `start_time` / `starts_at`, ...), riconosce sia quote decimali
+sia americane, e non solleva eccezioni sui campi che non conosce — li elenca fra
+le note dell'output.
+
+Due comandi per verificarla sui dati reali, prima di fidarsi dei numeri:
+
+```bash
+# 1. come SharpAPI chiama i campionati
+python3 edge_scan.py --odds-provider sharpapi --list-leagues
+
+# 2. forma della risposta e campi riconosciuti
+python3 edge_scan.py --odds-provider sharpapi --dump-odds --competitions SA
+```
+
+I codici campionato trovati vanno messi in un file JSON e passati con
+`--league-map`:
+
+```json
+{"SA": "italy-serie-a", "PL": "england-premier-league"}
+```
+
+Se qualcosa non torna, questi parametri coprono le varianti più probabili senza
+toccare il codice:
+
+| Opzione | Default | Quando cambiarla |
+|---|---|---|
+| `--sharpapi-auth` | `bearer` | se la chiave va in `X-API-Key` (`x-api-key`) o in query string (`query`) |
+| `--sharpapi-odds-path` | `/api/v1/odds` | se l'endpoint ha un percorso diverso |
+| `--sharpapi-league-param` | `league` | se il filtro campionato si chiama diversamente |
+| `--sharpapi-odds-format` | `auto` | forzare `decimal` o `american` se il riconoscimento sbaglia |
+| `--sharpapi-base` | `https://api.sharpapi.io` | altro host o versione |
+
+Se la risposta reale non rientra in nessuna delle forme supportate, `--dump-odds`
+lo rende evidente e la mappatura va estesa in `fbedge/sharpapi.py` (le costanti
+in cima al file) insieme a un caso in `tests/test_sharpapi_parsing.py`.
+
+Nota: SharpAPI espone già quote "no-vig" ed EV calcolati da loro. Questo script
+**non** li usa: parte dalle quote lorde e applica il proprio de-vig, così il
+confronto con il modello resta fatto con un metodo noto e controllabile
+(`--devig`).
 
 ## Uso
 
@@ -84,15 +137,17 @@ Codici competizione: `SA PL BL1 PD FL1 DED PPL CL ELC SB BL2 SD FL2` (oppure `al
 | `--half-life 30` | più reattivo ai cambi di forma, più rumoroso |
 | `--form-matches 6` | finestra più corta, come da letteratura sulla forma recente |
 | `--offline` | usa solo la cache locale, zero chiamate di rete |
-| `--btts` | tenta anche il mercato BTTS (richiede un piano a pagamento di The Odds API; in caso di rifiuto degrada da solo) |
+| `--btts` | tenta anche il mercato BTTS (su The Odds API richiede un piano a pagamento; in caso di rifiuto degrada da solo) |
+| `--odds-provider` | `sharpapi`, `theoddsapi` o `auto` |
 
 ## Consumo delle API
 
 Le risposte sono in cache su disco (`~/.cache/football-edge`, override con
 `--cache-dir`): 15 minuti per le quote, 1 ora per il calendario, 6 ore per lo
-storico. Un'esecuzione su 5 campionati costa circa 5 chiamate a football-data e
-5 × 2 crediti a The Odds API (1 credito per mercato × regione). I crediti
-residui vengono letti dagli header e stampati nel riepilogo.
+storico. Un'esecuzione su 5 campionati costa circa 5 chiamate a football-data e 5
+chiamate al provider di quote (su The Odds API, 2 crediti ciascuna: 1 per
+mercato × regione). I contatori residui vengono letti dagli header di risposta
+e stampati nel riepilogo.
 
 ## Cosa il modello non fa
 
@@ -116,8 +171,9 @@ Stampato integralmente a ogni esecuzione, in sintesi:
 ## Test
 
 ```bash
-python3 edge_scan.py --self-test        # coerenza matematica + esempio di output
-python3 -m tests.test_offline_pipeline  # pipeline completa su cache pre-caricata
+python3 edge_scan.py --self-test         # coerenza matematica + esempio di output
+python3 -m tests.test_offline_pipeline   # pipeline completa, entrambi i provider
+python3 -m tests.test_sharpapi_parsing   # parser SharpAPI su piu' forme di risposta
 ```
 
 Il self-test verifica fra l'altro che la griglia dei punteggi sommi a 1, che le
