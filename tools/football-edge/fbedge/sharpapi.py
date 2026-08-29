@@ -115,22 +115,71 @@ def _first(obj: Dict[str, Any], keys: Iterable[str]) -> Any:
     return None
 
 
-def _as_list(payload: Any) -> List[Any]:
-    """Estrae la lista di eventi da una risposta che puo' essere incapsulata."""
+def find_event_list(payload: Any) -> Tuple[Optional[str], List[Any]]:
+    """Trova la lista di eventi. Ritorna (chiave trovata, lista).
+
+    Distinguere "nessuna lista riconosciuta" da "lista presente ma vuota" e'
+    essenziale: il primo caso e' un errore di mappatura da correggere nel
+    codice, il secondo e' il provider che non ha dati da dare.
+    """
     if isinstance(payload, list):
-        return payload
+        return "(radice)", payload
     if isinstance(payload, dict):
         for key in EVENT_LIST_KEYS:
             value = payload.get(key)
             if isinstance(value, list):
-                return value
-        # {"data": {"events": [...]}}
-        for value in payload.values():
+                return key, value
+        for key, value in payload.items():
             if isinstance(value, (list, dict)):
-                nested = _as_list(value)
+                nested_key, nested = find_event_list(value)
                 if nested:
-                    return nested
-    return []
+                    return f"{key}.{nested_key}", nested
+    return None, []
+
+
+def _as_list(payload: Any) -> List[Any]:
+    """Comodita': solo la lista, senza la chiave."""
+    return find_event_list(payload)[1]
+
+
+def tier_notes(payload: Any) -> List[str]:
+    """Informazioni sul piano, che SharpAPI mette in `meta`.
+
+    Sono determinanti per capire un risultato vuoto: il piano gratuito copre
+    solo alcuni sport e alcuni bookmaker, e ritarda i dati.
+    """
+    if not isinstance(payload, dict):
+        return []
+    meta = payload.get("meta")
+    if not isinstance(meta, dict):
+        return []
+
+    notes: List[str] = []
+    tier = meta.get("tier")
+    if isinstance(tier, dict):
+        bits = []
+        if tier.get("name"):
+            bits.append(f"piano '{tier['name']}'")
+        if tier.get("data_delay_seconds"):
+            bits.append(f"dati ritardati di {tier['data_delay_seconds']}s")
+        if tier.get("requests_per_minute"):
+            bits.append(f"{tier['requests_per_minute']} richieste/minuto")
+        if isinstance(tier.get("books"), list):
+            bits.append(f"{len(tier['books'])} bookmaker")
+        if bits:
+            notes.append("[sharpapi] " + ", ".join(bits))
+        if tier.get("note"):
+            notes.append(f"[sharpapi] limiti del piano: {tier['note']}")
+
+    books = meta.get("books")
+    if isinstance(books, dict) and isinstance(books.get("in_scope"), list):
+        listed = [str(b) for b in books["in_scope"]]
+        notes.append(
+            f"[sharpapi] bookmaker disponibili: {', '.join(listed) or 'nessuno'}. "
+            "Con pochi book il consenso di mercato e' fragile: la probabilita' "
+            "equa deriva da poche quotazioni."
+        )
+    return notes
 
 
 def _to_decimal_odds(raw: Any, style: str = "auto") -> Optional[float]:
@@ -167,6 +216,12 @@ def _team_name(value: Any) -> str:
 class SharpApiClient:
     """Client SharpAPI con la stessa interfaccia di OddsApiClient."""
 
+    #: x-ratelimit-remaining conta le richieste rimaste nel minuto corrente,
+    #: non un budget mensile: si ricarica da solo e non va segnalato come
+    #: quota in esaurimento.
+    usage_label = "richieste nel minuto"
+    usage_is_budget = False
+
     def __init__(
         self,
         api_key: str,
@@ -176,6 +231,7 @@ class SharpApiClient:
         auth_style: str = "bearer",
         league_param: str = "league",
         odds_format: str = "auto",
+        max_pages: int = 5,
     ):
         if not api_key:
             raise ValueError("SHARPAPI_KEY mancante")
@@ -186,6 +242,7 @@ class SharpApiClient:
         self.auth_style = auth_style
         self.league_param = league_param
         self.odds_format = odds_format
+        self.max_pages = max(1, max_pages)
         self.requests_remaining: Optional[str] = None
         self.requests_used: Optional[str] = None
         self.unknown_fields: set[str] = set()
@@ -312,31 +369,72 @@ class SharpApiClient:
         }
         if bookmakers:
             params["bookmakers"] = bookmakers
-        try:
-            _url, payload = self._get(self.odds_path, params, ttl,
-                                      follow_suggestion=True)
-        except HttpError as exc:
-            if exc.status in (401, 403):
-                raise HttpError(
-                    exc.status, exc.url,
-                    "SHARPAPI_KEY rifiutata. Verificare la chiave e lo stile di "
-                    "autenticazione con --sharpapi-auth (bearer | x-api-key | query)",
-                ) from exc
-            if exc.status == 404:
-                result.notes.append(
-                    f"[sharpapi] nessun dato per '{sport_key}' su {self.odds_path}. "
-                    "Il codice campionato o il percorso potrebbero essere diversi: "
-                    "usare --list-leagues per scoprirli e --league-map per mapparli."
-                )
-                return result
-            raise
 
-        raw_events = _as_list(payload)
-        if not raw_events:
+        raw_events: List[Any] = []
+        container: Optional[str] = None
+        offset, pages, meta_read = 0, 0, False
+
+        while True:
+            page_params = dict(params)
+            if offset:
+                page_params["offset"] = offset
+            try:
+                _url, payload = self._get(self.odds_path, page_params, ttl,
+                                          follow_suggestion=True)
+            except HttpError as exc:
+                if exc.status in (401, 403):
+                    raise HttpError(
+                        exc.status, exc.url,
+                        "SHARPAPI_KEY rifiutata. Verificare la chiave e lo stile di "
+                        "autenticazione con --sharpapi-auth (bearer | x-api-key | query)",
+                    ) from exc
+                if exc.status == 404:
+                    result.notes.append(
+                        f"[sharpapi] nessun dato per '{sport_key}' su {self.odds_path}. "
+                        "Il codice campionato o il percorso potrebbero essere diversi: "
+                        "usare --list-leagues per scoprirli e --league-map per mapparli."
+                    )
+                    return result
+                raise
+
+            if not meta_read:
+                result.notes.extend(tier_notes(payload))
+                meta_read = True
+
+            key, page_events = find_event_list(payload)
+            container = container or key
+            raw_events.extend(page_events)
+            pages += 1
+
+            pagination = payload.get("pagination") if isinstance(payload, dict) else None
+            next_offset = (pagination or {}).get("next_offset")
+            if not (pagination and pagination.get("has_more")
+                    and next_offset is not None and pages < self.max_pages):
+                if pagination and pagination.get("has_more") and pages >= self.max_pages:
+                    result.notes.append(
+                        f"[sharpapi] fermato dopo {pages} pagine: ci sono altri "
+                        "eventi. Alza --sharpapi-max-pages se servono, tenendo "
+                        "d'occhio il consumo di richieste."
+                    )
+                break
+            offset = next_offset
+
+        if container is None:
             result.notes.append(
                 "[sharpapi] risposta ricevuta ma nessuna lista di eventi "
                 "riconosciuta. Struttura ottenuta:\n"
                 + _indent(summarize_structure(payload, max_depth=2))
+            )
+            return result
+
+        if not raw_events:
+            # struttura giusta, zero dati: non e' un problema di mappatura
+            result.notes.append(
+                f"[sharpapi] la risposta e' valida ma contiene 0 eventi per "
+                f"'{sport_key}'. Le cause tipiche, in ordine: il piano non copre "
+                "questo sport, il campionato non ha partite quotate in questo "
+                "momento, oppure le quote non sono ancora aperte. Le note sul "
+                "piano qui sopra dicono cosa e' incluso."
             )
             return result
 
@@ -346,14 +444,13 @@ class SharpApiClient:
                 result.events.append(event)
 
         if not result.events:
-            # senza la struttura del primo evento la diagnosi richiederebbe un
-            # altro giro: la si allega subito alla nota
             result.notes.append(
                 f"[sharpapi] {len(raw_events)} eventi ricevuti ma nessuno "
                 "interpretabile: mancano squadre, orario o quote riconoscibili. "
                 "Struttura del primo evento:\n"
                 + _indent(summarize_structure(raw_events[0], max_depth=3))
             )
+
         for requested, accepted in self.league_corrections.items():
             result.notes.append(
                 f"[sharpapi] codice campionato corretto dal provider: "
@@ -459,6 +556,11 @@ def _as_list_field(obj: Dict[str, Any], keys: Iterable[str]) -> List[Any]:
     return []
 
 
+#: chiavi il cui contenuto testuale va mostrato per intero
+VERBOSE_KEYS = {"note", "message", "error", "detail", "details", "upgrade",
+                "reason", "description", "hint"}
+
+
 def _indent(text: str, prefix: str = "      ") -> str:
     return "\n".join(prefix + line for line in text.splitlines())
 
@@ -476,7 +578,13 @@ def summarize_structure(payload: Any, depth: int = 0, max_depth: int = 4) -> str
                 lines.append(f"{pad}{key}: {kind}")
                 lines.append(summarize_structure(value, depth + 1, max_depth))
             else:
-                lines.append(f"{pad}{key}: {kind} = {json.dumps(value, default=str)[:60]}")
+                # note, messaggi d'errore e link non vanno troncati: sono
+                # esattamente le righe che spiegano perche' manca qualcosa
+                width = 400 if key in VERBOSE_KEYS else 80
+                rendered = json.dumps(value, default=str)
+                if len(rendered) > width:
+                    rendered = rendered[:width] + "..."
+                lines.append(f"{pad}{key}: {kind} = {rendered}")
         return "\n".join(l for l in lines if l.strip())
     if isinstance(payload, list):
         if not payload:

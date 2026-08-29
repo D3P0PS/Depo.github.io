@@ -129,11 +129,12 @@ class FooterTest(unittest.TestCase):
         from fbedge.config import Settings
         from fbedge.report import render_footer
         text = render_footer({"odds_provider": "sharpapi",
+                              "odds_usage_label": "richieste nel minuto",
                               "odds_requests_remaining": "431",
                               "odds_requests_used": "69"}, Settings(), 0, 3)
         self.assertIn("sharpapi", text)
-        self.assertIn("431 rimasti", text)
-        self.assertIn("69 usati", text)
+        self.assertIn("431 rimaste", text)
+        self.assertIn("69 usate", text)
 
     def test_missing_usage_counter_is_omitted_not_printed_as_none(self) -> None:
         from fbedge.config import Settings
@@ -141,7 +142,27 @@ class FooterTest(unittest.TestCase):
         text = render_footer({"odds_provider": "sharpapi",
                               "odds_requests_remaining": "11"}, Settings(), 0, 0)
         self.assertNotIn("None", text)
-        self.assertIn("Crediti quasi esauriti", text)   # 11 <= 50
+
+    def test_rate_limit_is_not_mistaken_for_an_exhausted_budget(self) -> None:
+        from fbedge.config import Settings
+        from fbedge.report import render_footer
+        # SharpAPI: 11 richieste rimaste nel minuto corrente, si ricaricano
+        text = render_footer({"odds_provider": "sharpapi",
+                              "odds_usage_label": "richieste nel minuto",
+                              "odds_usage_is_budget": False,
+                              "odds_requests_remaining": "11"}, Settings(), 0, 0)
+        self.assertIn("richieste nel minuto", text)
+        self.assertNotIn("Budget quasi esaurito", text)
+
+    def test_real_budget_running_out_is_flagged(self) -> None:
+        from fbedge.config import Settings
+        from fbedge.report import render_footer
+        text = render_footer({"odds_provider": "theoddsapi",
+                              "odds_usage_label": "crediti mensili",
+                              "odds_usage_is_budget": True,
+                              "odds_requests_remaining": "11",
+                              "odds_requests_used": "489"}, Settings(), 0, 0)
+        self.assertIn("Budget quasi esaurito", text)
 
 
 if __name__ == "__main__":

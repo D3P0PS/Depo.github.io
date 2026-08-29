@@ -169,6 +169,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     sh.add_argument("--league-map", default=None,
                     help="file JSON {\"SA\": \"codice-del-provider\"} per "
                          "correggere i codici campionato")
+    sh.add_argument("--sharpapi-max-pages", type=int, default=5,
+                    help="pagine di quote da scaricare al massimo per campionato "
+                         "(50 eventi per pagina, una richiesta per pagina)")
     sh.add_argument("--sport", default="soccer",
                     help="sport da cui filtrare i campionati in --list-leagues")
     sh.add_argument("--leagues-all", action="store_true",
@@ -342,6 +345,7 @@ def build_odds_client(args: argparse.Namespace, provider: str, key: str, http: H
             auth_style=args.sharpapi_auth,
             league_param=args.sharpapi_league_param,
             odds_format=args.sharpapi_odds_format,
+            max_pages=args.sharpapi_max_pages,
         )
     return OddsApiClient(key, http, regions=args.regions)
 
@@ -610,6 +614,8 @@ def run(args: argparse.Namespace) -> int:
         "righe_nascoste_dal_filtro": hidden,
         "unpriced_rows": len(unpriced),
         "odds_provider": provider if odds_client else None,
+        "odds_usage_label": getattr(odds_client, "usage_label", None),
+        "odds_usage_is_budget": getattr(odds_client, "usage_is_budget", False),
         "odds_requests_remaining": odds_client.requests_remaining if odds_client else None,
         "odds_requests_used": odds_client.requests_used if odds_client else None,
     }

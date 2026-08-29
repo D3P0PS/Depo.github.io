@@ -215,18 +215,20 @@ def render_footer(
 
     remaining = stats.get("odds_requests_remaining")
     if remaining is not None:
-        provider = stats.get("odds_provider") or "provider quote"
+        provider = stats.get("odds_provider") or "provider"
+        label = stats.get("odds_usage_label") or "richieste"
         used = stats.get("odds_requests_used")
-        line = f"  Crediti {provider:<19}: {remaining} rimasti"
+        line = f"  {provider} - {label}".ljust(29) + f": {remaining} rimaste"
         if used is not None:
-            line += f", {used} usati"
+            line += f", {used} usate"
         parts.append(line)
-        try:
-            if int(str(remaining)) <= 50:
-                parts.append("  ! Crediti quasi esauriti: alza --cache-ttl o riduci "
-                             "il numero di campionati per far durare il piano.")
-        except (TypeError, ValueError):
-            pass
+        if stats.get("odds_usage_is_budget"):
+            try:
+                if int(str(remaining)) <= 50:
+                    parts.append("  ! Budget quasi esaurito: alza la durata della "
+                                 "cache o riduci i campionati per farlo durare.")
+            except (TypeError, ValueError):
+                pass
 
     for note in stats.get("api_notes", []) or []:
         parts.append(f"  ! {note}")

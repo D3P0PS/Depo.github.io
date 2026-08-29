@@ -325,5 +325,86 @@ class LeagueSuggestionTest(unittest.TestCase):
         self.assertIsNone(suggested_value("null", "league"))
 
 
+META_FREE = {
+    "tier": {"name": "free", "data_delay_seconds": 60, "requests_per_minute": 12,
+             "books": ["a", "b"],
+             "note": "free-tier responses are delayed 60s and limited to 2 sports"},
+    "books": {"in_scope": ["pinnacle", "bet365"]},
+}
+
+
+class PagedHttp:
+    """Serve pagine diverse a seconda dell'offset, come il provider vero."""
+
+    def __init__(self, pages):
+        self.pages = pages
+        self.calls = []
+
+    def get(self, url, headers=None, ttl=0):
+        from fbedge.httpcache import Response
+        self.calls.append(url)
+        offset = 0
+        if "offset=" in url:
+            offset = int(url.split("offset=")[1].split("&")[0])
+        return Response(200, {}, json.dumps(self.pages[offset]), from_cache=False)
+
+
+class EmptyAndPagedResponseTest(unittest.TestCase):
+    """Una risposta valida ma vuota non e' un errore di mappatura."""
+
+    def test_empty_data_is_not_reported_as_unknown_structure(self) -> None:
+        http = PagedHttp({0: {"data": [], "pagination": {"count": 0, "has_more": False},
+                              "meta": META_FREE}})
+        result = SharpApiClient("TEST", http).fetch("serie_a", ["h2h"], ttl=0)
+        joined = " ".join(result.notes)
+        self.assertIn("0 eventi", joined)
+        self.assertNotIn("nessuna lista di eventi riconosciuta", joined)
+        self.assertEqual(result.events, [])
+
+    def test_plan_limits_are_surfaced(self) -> None:
+        http = PagedHttp({0: {"data": [], "pagination": {"has_more": False},
+                              "meta": META_FREE}})
+        joined = " ".join(SharpApiClient("TEST", http).fetch("serie_a", ["h2h"], 0).notes)
+        self.assertIn("piano 'free'", joined)
+        self.assertIn("limited to 2 sports", joined)      # la nota non va troncata
+        self.assertIn("pinnacle", joined)
+        self.assertIn("ritardati di 60s", joined)
+
+    def test_unknown_structure_is_still_reported_as_such(self) -> None:
+        http = PagedHttp({0: {"qualcosa": {"di": "inatteso"}}})
+        joined = " ".join(SharpApiClient("TEST", http).fetch("serie_a", ["h2h"], 0).notes)
+        self.assertIn("nessuna lista di eventi riconosciuta", joined)
+
+    def test_pagination_is_followed(self) -> None:
+        event = SHAPE_A["data"][0]
+        http = PagedHttp({
+            0: {"data": [event], "pagination": {"has_more": True, "next_offset": 50}},
+            50: {"data": [dict(event, id="evt-2")],
+                 "pagination": {"has_more": False, "next_offset": None}},
+        })
+        result = SharpApiClient("TEST", http).fetch("serie_a", ["h2h"], ttl=0)
+        self.assertEqual(len(result.events), 2)
+        self.assertEqual(len(http.calls), 2)
+
+    def test_pagination_stops_at_the_page_limit(self) -> None:
+        event = SHAPE_A["data"][0]
+        pages = {n * 50: {"data": [dict(event, id=f"evt-{n}")],
+                          "pagination": {"has_more": True, "next_offset": (n + 1) * 50}}
+                 for n in range(10)}
+        http = PagedHttp(pages)
+        client_ = SharpApiClient("TEST", http, max_pages=3)
+        result = client_.fetch("serie_a", ["h2h"], ttl=0)
+        self.assertEqual(len(http.calls), 3)
+        self.assertEqual(len(result.events), 3)
+        self.assertTrue(any("fermato dopo 3 pagine" in n for n in result.notes))
+
+    def test_diagnostic_notes_are_not_truncated(self) -> None:
+        from fbedge.sharpapi import summarize_structure
+        long_note = "x" * 300
+        text = summarize_structure({"note": long_note, "altro": "y" * 300})
+        self.assertIn("x" * 300, text)        # le note si vedono per intero
+        self.assertNotIn("y" * 300, text)     # il resto resta troncato
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

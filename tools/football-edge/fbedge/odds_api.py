@@ -24,6 +24,10 @@ BASE = "https://api.the-odds-api.com/v4"
 
 
 class OddsApiClient:
+    #: il contatore di The Odds API e' un budget mensile che si esaurisce
+    usage_label = "crediti mensili"
+    usage_is_budget = True
+
     def __init__(self, api_key: str, http: HttpClient, regions: str = "eu"):
         if not api_key:
             raise ValueError("ODDS_API_KEY mancante")
