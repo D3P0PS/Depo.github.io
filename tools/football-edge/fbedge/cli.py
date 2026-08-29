@@ -445,17 +445,27 @@ def cmd_list_leagues(args: argparse.Namespace, provider: str, key: str,
     return 0
 
 
+def _event_league(raw: object) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    for key in ("league", "league_id", "sport_key", "competition", "sport"):
+        value = raw.get(key)
+        if isinstance(value, dict):
+            value = value.get("id") or value.get("name")
+        if value:
+            return str(value)
+    return ""
+
+
 def cmd_diagnose_odds(args: argparse.Namespace, provider: str, key: str,
                       http: HttpClient, codes: List[str],
                       overrides: Dict[str, str], ttl: int) -> int:
     """Perche' la risposta quote e' vuota: prova le ipotesi in sequenza.
 
-    Una 200 con zero eventi puo' dipendere dal nome dei mercati, dal
-    campionato, o dal fatto che i bookmaker del piano non quotino quel
-    campionato. Si distinguono solo variando un parametro alla volta, e
-    confrontando i conteggi di /leagues con e senza il filtro sportsbook:
-    `event_count` conta gli eventi con quote disponibili, quindi il confronto
-    isola proprio la copertura dei book.
+    Ogni sonda controlla anche *a quale campionato* appartengano gli eventi
+    ricevuti. Contarli e basta non basta: un provider puo' rispondere 200 con
+    eventi di tutt'altro sport, e un conteggio nudo lo farebbe passare per
+    successo.
     """
     if provider != "sharpapi":
         print("--diagnose-odds e' disponibile solo per SharpAPI.", file=sys.stderr)
@@ -469,16 +479,19 @@ def cmd_diagnose_odds(args: argparse.Namespace, provider: str, key: str,
 
     print(f"DIAGNOSI QUOTE VUOTE - campionato '{league}'\n")
 
-    # --- A) l'endpoint quote, un filtro in meno alla volta ------------------
     probes = [
         ("A1. campionato + mercati ", {param: league, "markets": markets}),
         ("A2. campionato, no mercati", {param: league}),
         ("A3. nessun filtro         ", {}),
     ]
-    counts: Dict[str, int] = {}
-    leagues_seen: List[str] = []
+    matching: Dict[str, int] = {}
+    totals: Dict[str, int] = {}
+    seen: Dict[str, List[str]] = {}
     books: List[str] = []
+    filtro_ignorato = False
+
     for label, params in probes:
+        name = label.strip()
         try:
             _url, payload = client._get(client.odds_path, params, ttl)
         except HttpError as exc:
@@ -487,19 +500,34 @@ def cmd_diagnose_odds(args: argparse.Namespace, provider: str, key: str,
         books = books or plan_books(payload)
         _key, events = find_event_list(payload)
         pagination = payload.get("pagination") if isinstance(payload, dict) else None
-        counts[label.strip()] = int((pagination or {}).get("count", len(events)) or 0)
-        print(f"  {label}: {counts[label.strip()]} eventi")
-        if not params:
-            for raw in events[:80]:
-                if isinstance(raw, dict):
-                    found = raw.get("league") or raw.get("sport_key") or raw.get("sport")
-                    if found and str(found) not in leagues_seen:
-                        leagues_seen.append(str(found))
+        totals[name] = int((pagination or {}).get("count", len(events)) or 0)
 
-    if leagues_seen:
-        print(f"       campionati serviti: {', '.join(leagues_seen[:12])}")
+        leagues_here: List[str] = []
+        hits = 0
+        for raw in events:
+            found = _event_league(raw)
+            if found and found not in leagues_here:
+                leagues_here.append(found)
+            if found == league:
+                hits += 1
+        matching[name] = hits
+        seen[name] = leagues_here
 
-    # --- B) il catalogo, con e senza i bookmaker del piano ------------------
+        detail = f"{totals[name]} eventi"
+        if params.get(param):
+            detail += f", di cui {hits} di '{league}'"
+            if totals[name] and not hits:
+                filtro_ignorato = True
+        if leagues_here:
+            detail += f"  [campionati: {', '.join(leagues_here[:8])}]"
+        print(f"  {label}: {detail}")
+
+    if filtro_ignorato:
+        print(f"\n  Nota: il provider ha risposto con eventi che NON sono di "
+              f"'{league}'.\n  Il filtro campionato non e' stato applicato: i "
+              "conteggi grezzi non\n  vanno letti come quote trovate.")
+
+    # --- il catalogo, con e senza i bookmaker del piano --------------------
     def catalogue_count(sportsbooks: Optional[str]) -> Optional[int]:
         try:
             rows = client.list_leagues(ttl, sport=args.sport, sportsbooks=sportsbooks)
@@ -511,50 +539,47 @@ def cmd_diagnose_odds(args: argparse.Namespace, provider: str, key: str,
 
     print()
     all_books = catalogue_count(None)
-    if all_books is None:
-        print(f"  B1. catalogo, tutti i book: '{league}' non compare fra i "
-              f"campionati di '{args.sport}'")
-    else:
-        print(f"  B1. catalogo, tutti i book: {all_books} eventi con quote")
+    print(f"  B1. catalogo, tutti i book : "
+          + (f"{all_books} eventi con quote" if all_books is not None
+             else f"'{league}' non compare fra i campionati di '{args.sport}'"))
 
-    plan_only = None
+    plan_only: Optional[int] = None
     if books:
         plan_only = catalogue_count(",".join(books))
-        etichetta = "+".join(books)
-        print(f"  B2. catalogo, solo {etichetta}: "
-              f"{plan_only if plan_only is not None else 'campionato assente'}")
+        # assente dall'elenco filtrato = nessun evento quotato da quei book
+        coperto = plan_only if plan_only is not None else 0
+        print(f"  B2. catalogo, solo {'+'.join(books)}: {coperto} eventi con quote"
+              + ("  (campionato non elencato)" if plan_only is None else ""))
+        plan_only = coperto
 
-    # --- verdetto -----------------------------------------------------------
     print("\nLETTURA DEI RISULTATI\n")
-    con_mercati = counts.get("A1. campionato + mercati", 0)
-    senza_mercati = counts.get("A2. campionato, no mercati", 0)
-    senza_filtri = counts.get("A3. nessun filtro", 0)
-
-    if con_mercati:
+    if matching.get("A1. campionato + mercati", 0):
         print("  Le quote arrivano: riprova la corsa normale, il problema era altrove.")
-    elif senza_mercati:
+    elif matching.get("A2. campionato, no mercati", 0):
         print("  Il campionato ha eventi che spariscono col filtro mercati: 'h2h' e\n"
               "  'totals' non sono i nomi usati da questo provider. Guarda i mercati\n"
               "  presenti con --dump-odds e aggiorna MARKET_SYNONYMS in\n"
               "  fbedge/sharpapi.py.")
     elif all_books and plan_only == 0:
-        print(f"  Confermato: '{league}' ha {all_books} eventi quotati nel catalogo\n"
-              f"  completo, ma 0 con i bookmaker del tuo piano ({', '.join(books)}).\n"
-              "  Non e' un problema di codice: quei book non coprono questo\n"
-              "  campionato. Serve un piano con piu' bookmaker, oppure The Odds API\n"
-              "  (--odds-provider theoddsapi), che sul piano gratuito include i book\n"
-              "  europei.")
+        print(f"  Confermato: '{league}' ha {all_books} eventi quotati sul catalogo\n"
+              f"  completo, ma 0 con i bookmaker del tuo piano "
+              f"({', '.join(books)}).\n"
+              "  Non e' un problema di codice ne' di mappatura: quei book non\n"
+              "  coprono questo campionato, e nessuna modifica puo' cambiarlo.\n"
+              "  Serve un piano con piu' bookmaker, oppure The Odds API\n"
+              "  (--odds-provider theoddsapi), che sul piano gratuito include i\n"
+              "  book europei.")
     elif all_books == 0:
         print(f"  Il catalogo dichiara 0 eventi quotati per '{league}' anche su tutti\n"
-              "  i book: campionato fuori stagione, o quote non ancora aperte.\n"
-              "  Riprova piu' vicino alle partite.")
-    elif senza_filtri:
-        print("  Il provider restituisce eventi, ma nessuno di questo campionato.\n"
-              "  Se l'elenco qui sopra e' tutto sport americani, il piano copre solo\n"
-              "  quelli: usa The Odds API (--odds-provider theoddsapi).")
+              "  i book: campionato fuori stagione, o quote non ancora aperte.")
+    elif totals.get("A3. nessun filtro", 0):
+        altri = ", ".join(seen.get("A3. nessun filtro", [])[:8])
+        print(f"  Il provider serve eventi ({altri}) ma nessuno di '{league}'.\n"
+              "  Il piano copre altri sport: per il calcio europeo usa The Odds API\n"
+              "  (--odds-provider theoddsapi).")
     else:
-        print("  Nessun evento da nessuna combinazione. Le cause restano il piano o\n"
-              "  l'assenza di partite quotate adesso: --plan-info dice cosa include.")
+        print("  Nessun evento da nessuna combinazione. --plan-info dice cosa include\n"
+              "  il piano.")
     print("\n  Limiti dichiarati dal piano: python3 edge_scan.py --plan-info")
     return 0
 

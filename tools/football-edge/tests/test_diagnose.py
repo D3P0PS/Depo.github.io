@@ -50,11 +50,16 @@ class DiagnoseTest(unittest.TestCase):
         self._seed_catalogue(all_books=380, plan_books=380)
 
     def _seed_catalogue(self, all_books, plan_books) -> None:
-        """event_count con tutti i book e con i soli book del piano."""
+        """event_count con tutti i book e con i soli book del piano.
+
+        plan_books=None significa campionato del tutto assente dall'elenco
+        filtrato, che e' come il provider segnala "nessuna quota da quei book".
+        """
         self._seed(LEAGUES_PATH, {"sport": "soccer"}, leagues(all_books))
         self._seed(LEAGUES_PATH,
                    {"sport": "soccer", "sportsbook": "draftkings,fanduel"},
-                   leagues(plan_books))
+                   leagues(plan_books) if plan_books is not None
+                   else {"data": []})
 
     def tearDown(self) -> None:
         shutil.rmtree(self.cache, ignore_errors=True)
@@ -88,9 +93,26 @@ class DiagnoseTest(unittest.TestCase):
     def test_plan_serves_only_other_sports(self) -> None:
         out = self._run(EMPTY, EMPTY,
                         payload(dict(EVENT, league="nfl"), dict(EVENT, league="nba")))
-        self.assertIn("nessuno di questo campionato", out)
+        self.assertIn("ma nessuno di 'serie_a'", out)
         self.assertIn("nfl", out)
         self.assertIn("theoddsapi", out)          # indica la via d'uscita
+
+    def test_events_of_another_sport_are_not_counted_as_success(self) -> None:
+        """Caso reale: 50 eventi di golf in risposta a league=serie_a.
+
+        Il filtro campionato non viene applicato, e contare gli eventi senza
+        guardare a che campionato appartengono produceva il verdetto sbagliato
+        ("colpa dei nomi dei mercati") su un caso che era invece copertura
+        mancante dei bookmaker.
+        """
+        golf = [dict(EVENT, id=f"g{n}", league="pga") for n in range(50)]
+        self._seed_catalogue(all_books=20, plan_books=None)   # assente col filtro
+        out = self._run(EMPTY, payload(*golf), payload(*golf))
+        self.assertIn("pga", out)
+        self.assertIn("Il filtro campionato non e' stato applicato", out)
+        self.assertNotIn("spariscono col filtro mercati", out)   # il vecchio errore
+        self.assertIn("Confermato", out)
+        self.assertIn("draftkings", out)
 
     def test_plan_books_do_not_cover_the_league(self) -> None:
         # 380 eventi quotati in generale, 0 con draftkings+fanduel
