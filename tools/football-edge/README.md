@@ -211,6 +211,8 @@ Codici competizione: `SA PL BL1 PD FL1 DED PPL CL ELC SB BL2 SD FL2` (oppure `al
 | `--form-matches 6` | finestra più corta, come da letteratura sulla forma recente |
 | `--offline` | usa solo la cache locale, zero chiamate di rete |
 | `--width 200` | larghezza della tabella: di default si adatta al terminale, togliendo prima `BOOK`, poi `P.MKT`, poi l'intervallo. Edge, probabilità e affidabilità restano sempre |
+| `--html report.html` | salva una pagina HTML apribile nel browser, stesso contenuto della tabella da terminale |
+| `--open` | apre subito l'HTML nel browser di sistema (con `--html FILE` lo salva anche lì, altrimenti usa un file temporaneo) |
 | `--btts` | tenta anche il mercato BTTS (su The Odds API richiede un piano a pagamento; in caso di rifiuto degrada da solo) |
 | `--odds-provider` | `sharpapi`, `theoddsapi` o `auto` |
 

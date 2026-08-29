@@ -14,6 +14,7 @@ from .calibration import assess as assess_calibration
 from .calibration import render as render_calibration
 from .config import COMPETITIONS, DEFAULT_COMPETITIONS, Settings
 from .football_data import FootballDataClient, current_season_start_year
+from .html_report import render_html
 from .httpcache import (
     DEFAULT_CACHE_DIR,
     HttpClient,
@@ -140,6 +141,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     o = p.add_argument_group("output e rete")
     o.add_argument("--csv", metavar="FILE", help="salva la tabella in CSV")
     o.add_argument("--json", metavar="FILE", help="salva il risultato completo in JSON")
+    o.add_argument("--html", metavar="FILE", default=None,
+                   help="salva una pagina HTML apribile nel browser, con lo stesso "
+                        "contenuto della tabella da terminale")
+    o.add_argument("--open", action="store_true",
+                   help="apre l'HTML nel browser di sistema appena scritto "
+                        "(richiede --html, o ne usa uno temporaneo se omesso)")
     o.add_argument("--model-only", action="store_true",
                    help="niente quote: solo probabilita' del modello")
     o.add_argument("--offline", action="store_true",
@@ -862,6 +869,24 @@ def run(args: argparse.Namespace) -> int:
         with open(args.json, "w", encoding="utf-8") as fh:
             fh.write(to_json(shown + unpriced, stats, settings))
         print(f"JSON scritto in {args.json}")
+
+    html_path = args.html
+    if html_path or args.open:
+        import tempfile
+        if not html_path:
+            fd, html_path = tempfile.mkstemp(prefix="football-edge-", suffix=".html")
+            os.close(fd)
+        page = render_html(
+            shown, unpriced, calibration, stats, settings,
+            date_from, date_to, codes,
+            provider if odds_client else "nessuno (--model-only)", now,
+        )
+        with open(html_path, "w", encoding="utf-8") as fh:
+            fh.write(page)
+        print(f"HTML scritto in {html_path}")
+        if args.open:
+            import webbrowser
+            webbrowser.open(f"file://{os.path.abspath(html_path)}")
     return 0
 
 
