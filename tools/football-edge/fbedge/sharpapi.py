@@ -142,6 +142,22 @@ def _as_list(payload: Any) -> List[Any]:
     return find_event_list(payload)[1]
 
 
+def plan_books(payload: Any) -> List[str]:
+    """Bookmaker inclusi nel piano, dichiarati in meta."""
+    if not isinstance(payload, dict):
+        return []
+    meta = payload.get("meta")
+    if not isinstance(meta, dict):
+        return []
+    books = meta.get("books")
+    if isinstance(books, dict) and isinstance(books.get("in_scope"), list):
+        return [str(b) for b in books["in_scope"]]
+    tier = meta.get("tier")
+    if isinstance(tier, dict) and isinstance(tier.get("books"), list):
+        return [str(b) for b in tier["books"]]
+    return []
+
+
 def tier_notes(payload: Any) -> List[str]:
     """Informazioni sul piano, che SharpAPI mette in `meta`.
 
@@ -287,13 +303,36 @@ class SharpApiClient:
         return url, resp.json()
 
     # ------------------------------------------------------------ scoperta
-    def list_leagues(self, ttl: int, sport: str = "soccer") -> List[Dict[str, Any]]:
-        """Elenco dei campionati, filtrato per sport.
+    def list_leagues(
+        self,
+        ttl: int,
+        sport: str = "soccer",
+        sportsbooks: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Elenco dei campionati, con i filtri lato server quando accettati.
 
-        Ritorna [{'id', 'name', 'sport', 'events'}]. Se il campo sport non
-        c'e', ripiega sull'elenco di id esposto da /api/v1/sports.
+        `event_count` conta gli eventi *con quote disponibili*, non le partite
+        in calendario: un campionato fuori stagione, o non quotato dai
+        bookmaker del piano, resta elencato con 0. Il filtro `sportsbook`
+        restringe quel conteggio ai book indicati, ed e' il modo per capire se
+        sono loro a non coprire un campionato.
         """
-        _url, payload = self._get(LEAGUES_PATH, {}, ttl)
+        params: Dict[str, Any] = {}
+        if sport:
+            params["sport"] = sport
+        if sportsbooks:
+            params["sportsbook"] = sportsbooks
+
+        server_filtered = bool(params)
+        try:
+            _url, payload = self._get(LEAGUES_PATH, params, ttl)
+        except HttpError as exc:
+            if exc.status != 400 or not params:
+                raise
+            # filtri non accettati: si scarica tutto e si filtra qui
+            server_filtered = False
+            _url, payload = self._get(LEAGUES_PATH, {}, ttl)
+
         rows: List[Dict[str, Any]] = []
         for raw in _as_list(payload):
             if not isinstance(raw, dict):
@@ -311,7 +350,8 @@ class SharpApiClient:
                 "sport": str(_first(raw, LEAGUE_SPORT_KEYS) or ""),
                 "events": events,
             })
-        if not sport:
+
+        if not sport or server_filtered:
             return rows
 
         filtered = [r for r in rows if r["sport"].lower() == sport.lower()]

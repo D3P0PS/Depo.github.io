@@ -122,10 +122,13 @@ Se la risposta reale non rientra in nessuna delle forme supportate, `--dump-odds
 lo rende evidente e la mappatura va estesa in `fbedge/sharpapi.py` (le costanti
 in cima al file) insieme a un caso in `tests/test_sharpapi_parsing.py`.
 
-`--diagnose-odds` serve quando la risposta è valida ma senza eventi: rifà la
-stessa richiesta togliendo un filtro alla volta (mercati, poi campionato) e dal
-confronto stabilisce se il problema è il nome dei mercati, il campionato, o
-cosa il piano include davvero.
+`--diagnose-odds` serve quando la risposta è valida ma senza eventi. Rifà la
+stessa richiesta togliendo un filtro alla volta (mercati, poi campionato), poi
+confronta `event_count` in `/api/v1/leagues` con e senza il filtro `sportsbook`
+sui bookmaker del piano. Dato che `event_count` conta gli **eventi con quote
+disponibili**, quel confronto separa nettamente le tre cause possibili: nomi
+dei mercati sbagliati, campionato fuori stagione, oppure bookmaker del piano
+che non coprono quel campionato.
 
 Attenzione al piano: SharpAPI dichiara i propri limiti nel campo `meta` di ogni
 risposta, e sul piano gratuito sono stringenti (pochi sport, pochi bookmaker,

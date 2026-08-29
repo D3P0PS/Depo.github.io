@@ -29,20 +29,32 @@ EVENT = {
             {"name": "Inter", "price": 2.0}, {"name": "Draw", "price": 3.4},
             {"name": "Napoli", "price": 3.8}]}]}],
 }
-LEAGUES = {"data": [{"id": "serie_a", "display_name": "Serie A",
-                     "sport": "soccer", "event_count": 380}]}
-EMPTY = {"data": [], "pagination": {"count": 0}}
+def leagues(count):
+    return {"data": [{"id": "serie_a", "display_name": "Serie A",
+                      "sport": "soccer", "event_count": count}]}
+
+
+META = {"tier": {"name": "free", "books": ["draftkings", "fanduel"]},
+        "books": {"in_scope": ["draftkings", "fanduel"]}}
+EMPTY = {"data": [], "pagination": {"count": 0}, "meta": META}
 
 
 def payload(*events):
-    return {"data": list(events), "pagination": {"count": len(events)}}
+    return {"data": list(events), "pagination": {"count": len(events)}, "meta": META}
 
 
 class DiagnoseTest(unittest.TestCase):
     def setUp(self) -> None:
         self.cache = tempfile.mkdtemp(prefix="fbedge-diag-")
         self.client = HttpClient(cache_dir=self.cache)
-        self._seed(LEAGUES_PATH, None, LEAGUES)
+        self._seed_catalogue(all_books=380, plan_books=380)
+
+    def _seed_catalogue(self, all_books, plan_books) -> None:
+        """event_count con tutti i book e con i soli book del piano."""
+        self._seed(LEAGUES_PATH, {"sport": "soccer"}, leagues(all_books))
+        self._seed(LEAGUES_PATH,
+                   {"sport": "soccer", "sportsbook": "draftkings,fanduel"},
+                   leagues(plan_books))
 
     def tearDown(self) -> None:
         shutil.rmtree(self.cache, ignore_errors=True)
@@ -80,10 +92,20 @@ class DiagnoseTest(unittest.TestCase):
         self.assertIn("nfl", out)
         self.assertIn("theoddsapi", out)          # indica la via d'uscita
 
-    def test_catalogue_lists_it_but_no_odds_anywhere(self) -> None:
+    def test_plan_books_do_not_cover_the_league(self) -> None:
+        # 380 eventi quotati in generale, 0 con draftkings+fanduel
+        self._seed_catalogue(all_books=380, plan_books=0)
         out = self._run(EMPTY, EMPTY, EMPTY)
-        self.assertIn("380 eventi dichiarati", out)
-        self.assertIn("serve le quote solo per", out)
+        self.assertIn("Confermato", out)
+        self.assertIn("draftkings", out)
+        self.assertIn("theoddsapi", out)
+
+    def test_league_out_of_season_is_distinguished(self) -> None:
+        # nessuna quota nemmeno su tutti i book: non e' colpa del piano
+        self._seed_catalogue(all_books=0, plan_books=0)
+        out = self._run(EMPTY, EMPTY, EMPTY)
+        self.assertIn("fuori stagione", out)
+        self.assertNotIn("Confermato", out)
 
     def test_odds_present_means_no_problem(self) -> None:
         out = self._run(payload(EVENT), payload(EVENT), payload(EVENT))
