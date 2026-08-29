@@ -318,6 +318,35 @@ class SharpApiPipelineTest(OfflinePipelineTest):
         # le probabilita' di modello restano comunque visibili
         self.assertIn("Internazionale - Napoli", out)
 
+    def test_plan_info_prints_the_limits_in_full(self) -> None:
+        # risposta vuota con i limiti del piano, come la manda il provider
+        client = HttpClient(cache_dir=self.cache_dir)
+        nota = ("free-tier responses are delayed 60s and limited to 2 sports; "
+                "upgrade for soccer and 40+ books")
+        client._write_cache(
+            build_url(f"{SHARP_BASE}{SHARP_PATH}",
+                      {"league": "serie-a-vuota", "markets": "h2h"}),
+            Response(200, {}, json.dumps({
+                "data": [],
+                "pagination": {"count": 0, "has_more": False},
+                "meta": {"tier": {"name": "free", "data_delay_seconds": 60,
+                                  "requests_per_minute": 12, "note": nota},
+                         "books": {"in_scope": ["pinnacle", "bet365"]}},
+            }), from_cache=False),
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = cli.main([
+                "--competitions", "SA", "--offline", "--cache-dir", self.cache_dir,
+                "--football-data-key", "TEST", "--odds-provider", "sharpapi",
+                "--sharpapi-key", "TEST", "--plan-info", "--league", "serie-a-vuota",
+            ])
+        out = buf.getvalue()
+        self.assertEqual(code, 0, out)
+        self.assertIn(nota, out)                 # per intero, non troncata
+        self.assertIn("pinnacle", out)
+        self.assertIn("Eventi restituiti", out)
+
     def test_min_edge_filter_keeps_rows_visible(self) -> None:
         self.skipTest("coperto dalla variante The Odds API")
 

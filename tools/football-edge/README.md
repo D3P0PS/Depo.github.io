@@ -78,6 +78,9 @@ SharpAPI usa id di campionato propri (slug corti tipo `nfl`, `serie-a`), non i
 codici di The Odds API: vanno scoperti e mappati una volta sola.
 
 ```bash
+# 0. cosa copre davvero il tuo piano (sport, bookmaker, ritardo dei dati)
+python3 edge_scan.py --odds-provider sharpapi --plan-info
+
 # 1. propone la mappa confrontando i nostri campionati con i loro
 python3 edge_scan.py --odds-provider sharpapi --list-leagues --leagues-out leghe.json
 
@@ -115,6 +118,13 @@ toccare il codice:
 Se la risposta reale non rientra in nessuna delle forme supportate, `--dump-odds`
 lo rende evidente e la mappatura va estesa in `fbedge/sharpapi.py` (le costanti
 in cima al file) insieme a un caso in `tests/test_sharpapi_parsing.py`.
+
+Attenzione al piano: SharpAPI dichiara i propri limiti nel campo `meta` di ogni
+risposta, e sul piano gratuito sono stringenti (pochi sport, pochi bookmaker,
+dati ritardati). Se `data` torna vuota, `--plan-info` dice il perché: una
+risposta valida con zero eventi non è un errore di mappatura. Con pochi
+bookmaker il consenso di mercato è comunque fragile — la probabilità "equa"
+deriva da poche quotazioni, e l'edge che ne esce è più rumoroso.
 
 Nota: SharpAPI espone già quote "no-vig" ed EV calcolati da loro. Questo script
 **non** li usa: parte dalle quote lorde e applica il proprio de-vig, così il

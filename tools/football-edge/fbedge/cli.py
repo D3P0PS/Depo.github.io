@@ -27,7 +27,7 @@ from .odds_types import MARKET_BTTS, MARKET_H2H, MARKET_TOTALS
 from .sharpapi import LEAGUES_PATH
 from .sharpapi import DEFAULT_BASE as SHARP_BASE
 from .sharpapi import DEFAULT_ODDS_PATH as SHARP_ODDS_PATH
-from .sharpapi import SharpApiClient, summarize_structure
+from .sharpapi import SharpApiClient, summarize_structure, tier_notes
 from .report import (
     SEPARATOR,
     render_footer,
@@ -181,6 +181,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     sh.add_argument("--league", default=None,
                     help="con --dump-odds, id campionato da interrogare "
                          "direttamente, senza passare da --league-map")
+    sh.add_argument("--plan-info", action="store_true",
+                    help="stampa per intero i limiti del piano (sport coperti, "
+                         "bookmaker, ritardo dei dati) ed esce")
     sh.add_argument("--list-leagues", action="store_true",
                     help="elenca i campionati come li chiama il provider ed esce")
     sh.add_argument("--dump-odds", action="store_true",
@@ -433,6 +436,39 @@ def cmd_list_leagues(args: argparse.Namespace, provider: str, key: str,
     return 0
 
 
+def cmd_plan_info(args: argparse.Namespace, provider: str, key: str,
+                  http: HttpClient, codes: List[str], overrides: Dict[str, str],
+                  ttl: int) -> int:
+    """Stampa per intero i limiti del piano dichiarati dal provider."""
+    if provider != "sharpapi":
+        print("--plan-info e' disponibile solo per SharpAPI: The Odds API "
+              "espone i suoi limiti solo negli header, gia' nel riepilogo.",
+              file=sys.stderr)
+        return 2
+
+    comp = COMPETITIONS[codes[0]]
+    league = args.league or league_key_for(comp, provider, overrides) or "serie_a"
+    client = build_odds_client(args, provider, key, http)
+    _url, payload = client.dump_raw(league, [MARKET_H2H], ttl)
+
+    print("LIMITI DEL PIANO DICHIARATI DA SHARPAPI\n")
+    notes = tier_notes(payload)
+    if not notes:
+        print("  Il provider non ha dichiarato nessun limite in questa risposta.")
+    for note in notes:
+        print("  " + note.replace("[sharpapi] ", ""))
+
+    meta = payload.get("meta") if isinstance(payload, dict) else None
+    if meta:
+        print("\nBlocco 'meta' completo, senza tagli:\n")
+        print(json.dumps(meta, indent=2, ensure_ascii=False))
+
+    pagination = payload.get("pagination") if isinstance(payload, dict) else None
+    if isinstance(pagination, dict):
+        print(f"\nEventi restituiti per '{league}': {pagination.get('count', '?')}")
+    return 0
+
+
 def cmd_dump_odds(args: argparse.Namespace, provider: str, key: str, http: HttpClient,
                   codes: List[str], overrides: Dict[str, str], ttl: int) -> int:
     """Stampa la risposta grezza delle quote, per verificare la mappatura."""
@@ -515,6 +551,9 @@ def run(args: argparse.Namespace) -> int:
         print(f"--league-map non leggibile: {exc}", file=sys.stderr)
         return 2
 
+    if args.plan_info:
+        return cmd_plan_info(args, provider, odds_key, http, codes, overrides,
+                             settings.cache_ttl_odds)
     if args.list_leagues:
         return cmd_list_leagues(args, provider, odds_key, http, codes,
                                 settings.cache_ttl_odds)
