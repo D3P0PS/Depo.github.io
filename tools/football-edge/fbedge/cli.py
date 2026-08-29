@@ -10,6 +10,8 @@ import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .analysis import EdgeRow, RELIABILITY_OK, analyze_fixture
+from .calibration import assess as assess_calibration
+from .calibration import render as render_calibration
 from .config import COMPETITIONS, DEFAULT_COMPETITIONS, Settings
 from .football_data import FootballDataClient, current_season_start_year
 from .httpcache import (
@@ -791,6 +793,9 @@ def run(args: argparse.Namespace) -> int:
 
     priced = [r for r in rows if r.edge_pct is not None]
     unpriced = [r for r in rows if r.edge_pct is None]
+    # calibrazione sull'insieme delle righe, non su quelle sopravvissute al
+    # filtro: un modello sbagliato lo e' anche nelle righe che non mostriamo
+    calibration = assess_calibration(priced)
     threshold = settings.min_edge_pct
     kept = priced if threshold is None else [r for r in priced if r.edge_pct >= threshold]
     shown = sorted(kept, key=lambda r: r.sort_key)
@@ -803,6 +808,8 @@ def run(args: argparse.Namespace) -> int:
         "api_notes": api_notes,
         "righe_nascoste_dal_filtro": hidden,
         "unpriced_rows": len(unpriced),
+        "calibrazione_sospetta": calibration.suspect,
+        "scostamento_medio_punti": round(calibration.mean_deviation * 100, 2),
         "odds_provider": provider if odds_client else None,
         "odds_usage_label": getattr(odds_client, "usage_label", None),
         "odds_usage_is_budget": getattr(odds_client, "usage_is_budget", False),
@@ -812,6 +819,10 @@ def run(args: argparse.Namespace) -> int:
 
     print(render_header(date_from, date_to, codes, settings, now,
                         provider if odds_client else "nessuno (--model-only)"))
+
+    blocco = render_calibration(calibration)
+    if blocco:
+        print(blocco)
     if shown:
         print(render_table(shown, settings, width=args.width or None))
     else:

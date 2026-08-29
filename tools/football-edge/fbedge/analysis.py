@@ -49,6 +49,13 @@ class EdgeRow:
     home_matches: int
     away_matches: int
     note: str = ""
+    #: scomposizione dell'edge. Quello "di prezzo" e' quanto renderebbe la
+    #: quota migliore anche se il modello fosse d'accordo col mercato: dipende
+    #: solo dalla dispersione fra bookmaker. Quello "di modello" e' il resto,
+    #: cioe' il vero disaccordo con il mercato. Confonderli fa scambiare una
+    #: quota anomala per una previsione azzeccata.
+    edge_price_pct: Optional[float] = None
+    edge_model_pct: Optional[float] = None
 
     @property
     def sort_key(self) -> Tuple[int, float]:
@@ -273,10 +280,15 @@ def _make_row(
 ) -> EdgeRow:
     market, selection = _labels(market_id)
     edge = edge_lo = edge_hi = delta = None
+    edge_price = edge_model = None
     if odds:
         edge = (p_model * odds - 1.0) * 100.0
         edge_lo = (p_lo * odds - 1.0) * 100.0
         edge_hi = (p_hi * odds - 1.0) * 100.0
+        if p_market is not None:
+            # quanto renderebbe questa quota se il mercato avesse ragione
+            edge_price = (p_market * odds - 1.0) * 100.0
+            edge_model = edge - edge_price
         if abs(edge) > IMPLAUSIBLE_EDGE_PCT:
             extra = (
                 f"edge oltre {IMPLAUSIBLE_EDGE_PCT:g}% in valore assoluto: prima di "
@@ -303,6 +315,8 @@ def _make_row(
         edge_pct=edge,
         edge_lo=edge_lo,
         edge_hi=edge_hi,
+        edge_price_pct=edge_price,
+        edge_model_pct=edge_model,
         delta_pp=delta,
         reliability=reliability,
         reliability_note=reliability_note,

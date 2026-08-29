@@ -204,6 +204,31 @@ chiamate al provider di quote (su The Odds API, 2 crediti ciascuna: 1 per
 mercato × regione). I contatori residui vengono letti dagli header di risposta
 e stampati nel riepilogo.
 
+## Controllo di calibrazione
+
+Prima della tabella viene stampato un confronto complessivo fra modello e
+mercato: scostamento medio, correlazione, scarto sugli esiti improbabili, quota
+di righe con edge oltre il 15%. Se il modello diverge in modo sistematico, la
+corsa viene marcata **non utilizzabile come lista di occasioni**, in cima e non
+in fondo.
+
+Serve perché un modello mal calibrato sbaglia su tutte le righe insieme, e
+allora ogni riga sembra un'occasione. Un output pieno di edge grandi non è una
+giornata fortunata: è un errore di misura.
+
+L'edge viene anche scomposto (colonne `edge_da_prezzo_pct` e
+`edge_da_modello_pct` nel CSV/JSON) in due parti che vanno lette in modo
+diverso:
+
+- **edge di prezzo**: quanto renderebbe la quota migliore *anche dando ragione
+  al mercato*. Dipende solo dalla dispersione fra bookmaker. Se è grande su un
+  mercato liquido, la quota è probabilmente stantia o non confrontabile.
+- **edge di modello**: il resto, cioè il vero disaccordo con il mercato. È
+  quello che si sta scommettendo quando si crede al modello.
+
+Una riga con edge +30% tutto "di prezzo" e un'altra con +30% tutto "di modello"
+sono situazioni opposte; sommate in una colonna sola sarebbero indistinguibili.
+
 ## Cosa il modello non fa
 
 Stampato integralmente a ogni esecuzione, in sintesi:
@@ -231,6 +256,7 @@ python3 -m tests.test_offline_pipeline   # pipeline completa, entrambi i provide
 python3 -m tests.test_sharpapi_parsing   # parser SharpAPI su piu' forme di risposta
 python3 -m tests.test_env_keys           # caricamento delle chiavi da .env
 python3 -m tests.test_diagnose           # diagnosi della risposta quote vuota
+python3 -m tests.test_calibration        # controllo di calibrazione e scomposizione
 ```
 
 Il self-test verifica fra l'altro che la griglia dei punteggi sommi a 1, che le

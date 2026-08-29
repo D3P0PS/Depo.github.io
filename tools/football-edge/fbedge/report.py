@@ -260,6 +260,12 @@ def rows_to_dicts(rows: Sequence[EdgeRow]) -> List[dict]:
                     round(r.p_market * 100, 2) if r.p_market is not None else None
                 ),
                 "edge_pct": round(r.edge_pct, 2) if r.edge_pct is not None else None,
+                "edge_da_prezzo_pct": (
+                    round(r.edge_price_pct, 2) if r.edge_price_pct is not None else None
+                ),
+                "edge_da_modello_pct": (
+                    round(r.edge_model_pct, 2) if r.edge_model_pct is not None else None
+                ),
                 "edge_ic_basso_pct": round(r.edge_lo, 2) if r.edge_lo is not None else None,
                 "edge_ic_alto_pct": round(r.edge_hi, 2) if r.edge_hi is not None else None,
                 "differenza_prob_punti": (
