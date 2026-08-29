@@ -7,7 +7,7 @@ import datetime as dt
 import json
 import os
 import sys
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .analysis import EdgeRow, RELIABILITY_OK, analyze_fixture
 from .config import COMPETITIONS, DEFAULT_COMPETITIONS, Settings
@@ -38,6 +38,14 @@ from .report import (
 
 KEYS_HELP = """\
 Serve una chiave per i dati storici e una per le quote.
+
+Il modo piu' comodo: un file .env nella cartella dello script (viene caricato
+da solo, ed e' gia' in .gitignore).
+
+    FOOTBALL_DATA_API_KEY=...
+    SHARPAPI_KEY=...
+
+Verifica con:  python3 edge_scan.py --check-keys
 
   1) Dati storici - football-data.org
      https://www.football-data.org/client/register
@@ -130,10 +138,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     o.add_argument("--football-data-key", default=None)
     o.add_argument("--odds-key", default=None, help="chiave The Odds API")
     o.add_argument("--sharpapi-key", default=None, help="chiave SharpAPI")
-    o.add_argument("--env-file", default=None, help="file con le variabili delle chiavi")
+    o.add_argument("--env-file", default=None,
+                   help="file KEY=VALUE con le chiavi. Se omesso viene cercato "
+                        "un .env nella cartella corrente e in quella dello script")
     o.add_argument("--verbose", action="store_true")
     o.add_argument("--self-test", action="store_true",
                    help="verifica il modello su dati sintetici, senza rete")
+    o.add_argument("--check-keys", action="store_true",
+                   help="mostra quali chiavi sono state trovate e da dove, "
+                        "senza chiamare le API")
 
     sh = p.add_argument_group(
         "SharpAPI (mappatura dei campi ricostruita: verificare con --dump-odds)")
@@ -159,14 +172,103 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def load_env_file(path: str) -> None:
+#: cartella dello script, dove si cerca un .env se non ne viene passato uno
+SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+KEY_VARIABLES = [
+    ("FOOTBALL_DATA_API_KEY", "dati storici (football-data.org)", True),
+    ("SHARPAPI_KEY", "quote (SharpAPI)", False),
+    ("ODDS_API_KEY", "quote (The Odds API)", False),
+]
+
+
+def load_env_file(path: str) -> List[str]:
+    """Legge un file KEY=VALUE. Le variabili d'ambiente gia' presenti vincono.
+
+    Ritorna i nomi effettivamente impostati dal file, per poter dire poi da
+    dove arriva ciascuna chiave.
+    """
+    applied: List[str] = []
     with open(path, "r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
+            if line.startswith("export "):
+                line = line[len("export "):].strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+            key = key.strip()
+            if key not in os.environ:
+                os.environ[key] = value.strip().strip("'\"")
+                applied.append(key)
+    return applied
+
+
+def autoload_env(explicit: Optional[str]) -> Tuple[Optional[str], List[str]]:
+    """Carica il file indicato, oppure il primo .env trovato.
+
+    Ritorna (file usato, nomi impostati da quel file).
+    """
+    if explicit:
+        return explicit, load_env_file(explicit)
+    for candidate in (os.path.join(os.getcwd(), ".env"),
+                      os.path.join(SCRIPT_DIR, ".env")):
+        if os.path.isfile(candidate):
+            return candidate, load_env_file(candidate)
+    return None, []
+
+
+def _mask(value: str) -> str:
+    """Mostra solo la coda della chiave: quel tanto che basta a riconoscerla."""
+    return f"{'.' * 6}{value[-4:]} ({len(value)} caratteri)" if len(value) > 8 else "(molto corta)"
+
+
+def cmd_check_keys(args: argparse.Namespace, env_file: Optional[str],
+                   from_file: Sequence[str]) -> int:
+    """Dice quali chiavi sono state trovate e da dove, senza chiamare le API."""
+    print("Chiavi trovate\n")
+    print(f"  File .env letto : {env_file or 'nessuno'}")
+    print(f"  Cartella script : {SCRIPT_DIR}\n")
+
+    overrides = {
+        "FOOTBALL_DATA_API_KEY": args.football_data_key,
+        "SHARPAPI_KEY": args.sharpapi_key,
+        "ODDS_API_KEY": args.odds_key,
+    }
+    problems: List[str] = []
+    for name, description, required in KEY_VARIABLES:
+        from_flag = overrides.get(name)
+        value = from_flag or os.environ.get(name, "")
+        if from_flag:
+            origin = "opzione da riga di comando"
+        elif name in from_file:
+            origin = f"file {os.path.basename(env_file or '.env')}"
+        else:
+            origin = "variabile d'ambiente" if value else "-"
+        if value:
+            print(f"  [ok]      {name:24} {_mask(value):28} {description}  [{origin}]")
+            if value != value.strip() or " " in value:
+                problems.append(f"{name} contiene spazi: probabile errore di copia")
+            if value[0] in "\"'" or value[-1] in "\"'":
+                problems.append(f"{name} inizia o finisce con una virgoletta")
+        else:
+            marker = "MANCA" if required else "-"
+            print(f"  [{marker:5}]   {name:24} {'':28} {description}")
+
+    provider, key = resolve_provider(args)
+    print()
+    if not os.environ.get("FOOTBALL_DATA_API_KEY") and not args.football_data_key:
+        print("  Senza FOOTBALL_DATA_API_KEY non si puo' stimare niente: e' obbligatoria.")
+    if key:
+        print(f"  Provider quote che verrebbe usato: {provider}")
+    else:
+        print("  Nessuna chiave per le quote: si puo' usare solo --model-only "
+              "(probabilita' del modello, nessun edge).")
+    for problem in problems:
+        print(f"  ! {problem}")
+    print("\n  Nota: le chiavi non vengono mai stampate per intero ne' inviate "
+          "altrove che alle rispettive API.")
+    return 0
 
 
 def resolve_date_range(spec: str, days: int) -> tuple[dt.date, dt.date]:
@@ -291,8 +393,9 @@ def cmd_dump_odds(args: argparse.Namespace, provider: str, key: str, http: HttpC
 
 
 def run(args: argparse.Namespace) -> int:
-    if args.env_file:
-        load_env_file(args.env_file)
+    env_file, from_file = autoload_env(args.env_file)
+    if args.check_keys:
+        return cmd_check_keys(args, env_file, from_file)
 
     fd_key = args.football_data_key or os.environ.get("FOOTBALL_DATA_API_KEY", "")
     provider, odds_key = resolve_provider(args)

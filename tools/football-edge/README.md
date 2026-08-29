@@ -27,19 +27,42 @@ saltate con un messaggio esplicito nel riepilogo.
 
 ## Chiavi API
 
-Entrambe gratuite, registrazione in un minuto:
+Ne servono due: una per i dati storici (obbligatoria) e una per le quote.
+
+**Modo consigliato — file `.env`** (viene caricato da solo, ed è in `.gitignore`):
+
+```bash
+cp .env.example .env     # poi incolla le chiavi dentro
+python3 edge_scan.py --check-keys
+```
+
+Il file `.env` viene cercato prima nella cartella corrente, poi in quella dello
+script. Con `--env-file /percorso/altro.env` se ne usa uno diverso.
+
+**In alternativa — variabili d'ambiente** (hanno la precedenza sul file):
 
 ```bash
 export FOOTBALL_DATA_API_KEY="..."   # https://www.football-data.org/client/register
-export SHARPAPI_KEY="..."            # https://sharpapi.io/   (provider quote)
-# oppure, in alternativa a SharpAPI:
+export SHARPAPI_KEY="..."            # https://sharpapi.io/  (provider quote)
+# oppure, al posto di SharpAPI:
 export ODDS_API_KEY="..."            # https://the-odds-api.com/#get-access
 ```
 
-In alternativa `--football-data-key` / `--sharpapi-key` / `--odds-key`, oppure
-un file passato con `--env-file`. Senza chiave quote si può usare
-`--model-only`: si ottengono le probabilità del modello, ma nessun edge (senza
-quote non c'è niente con cui confrontarsi).
+Aggiungile a `~/.bashrc` o `~/.zshrc` per non ripeterle a ogni sessione.
+
+**Oppure — solo per un comando**, senza salvarle da nessuna parte:
+
+```bash
+python3 edge_scan.py --football-data-key "..." --sharpapi-key "..."
+```
+
+`--check-keys` dice quali chiavi ha trovato, da dove arriva ciascuna e quale
+provider verrebbe usato, senza fare nessuna chiamata alle API. Le chiavi non
+vengono mai stampate per intero, e nei log le URL sono sempre mascherate.
+
+Senza chiave per le quote si può usare `--model-only`: si ottengono le
+probabilità del modello, ma nessun edge (senza quote non c'è niente con cui
+confrontarsi).
 
 ## SharpAPI: mappatura da verificare al primo avvio
 
@@ -174,6 +197,7 @@ Stampato integralmente a ogni esecuzione, in sintesi:
 python3 edge_scan.py --self-test         # coerenza matematica + esempio di output
 python3 -m tests.test_offline_pipeline   # pipeline completa, entrambi i provider
 python3 -m tests.test_sharpapi_parsing   # parser SharpAPI su piu' forme di risposta
+python3 -m tests.test_env_keys           # caricamento delle chiavi da .env
 ```
 
 Il self-test verifica fra l'altro che la griglia dei punteggi sommi a 1, che le
