@@ -6,7 +6,7 @@ import csv
 import datetime as dt
 import io
 import json
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .analysis import EdgeRow, RELIABILITY_OK
 from .config import Settings
@@ -26,41 +26,95 @@ def _truncate(text: str, width: int) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
-def render_table(rows: Sequence[EdgeRow], settings: Settings) -> str:
+#: larghezze piene delle colonne
+FULL_COLUMNS: List[Tuple[str, int]] = [
+    ("PARTITA", 28),
+    ("MERCATO", 14),
+    ("SELEZIONE", 13),
+    ("BOOK", 10),
+    ("QUOTA", 6),
+    ("P.MOD", 6),
+    ("P.MKT", 6),
+    ("EDGE", 7),
+    ("IC EDGE", 16),
+    ("AFFID.", 7),
+]
+
+#: come restringere la tabella, un passo alla volta, quando il terminale e'
+#: stretto. Si accorciano prima i nomi delle squadre, poi si tolgono le colonne
+#: meno essenziali. Edge, probabilita' di modello e affidabilita' non si
+#: tolgono mai: sono il minimo per leggere una riga senza fraintenderla.
+NARROW_STEPS = [
+    ("shrink", "PARTITA", 22),
+    ("drop", "BOOK", 0),
+    ("shrink", "PARTITA", 18),
+    ("drop", "P.MKT", 0),
+    ("drop", "IC EDGE", 0),
+    ("shrink", "PARTITA", 14),
+]
+
+
+def terminal_width(default: int = 132) -> int:
+    try:
+        import shutil
+        width = shutil.get_terminal_size(fallback=(default, 24)).columns
+    except Exception:
+        return default
+    return width if width >= 60 else default
+
+
+def _table_width(columns: Sequence[Tuple[str, int]]) -> int:
+    return sum(w for _n, w in columns) + 2 * (len(columns) - 1)
+
+
+def _fit_columns(width: int) -> List[Tuple[str, int]]:
+    """Applica i passi di riduzione finche' la tabella non entra."""
+    columns = list(FULL_COLUMNS)
+    for action, name, value in NARROW_STEPS:
+        if _table_width(columns) <= width:
+            break
+        if action == "drop":
+            columns = [c for c in columns if c[0] != name]
+        else:
+            columns = [(n, min(w, value) if n == name else w) for n, w in columns]
+    return columns
+
+
+def render_table(rows: Sequence[EdgeRow], settings: Settings,
+                 width: Optional[int] = None) -> str:
+    columns = _fit_columns(width or terminal_width())
+    names = [name for name, _w in columns]
     header = [
-        ("PARTITA", 34),
-        ("MERCATO", 15),
-        ("SELEZIONE", 14),
-        ("BOOK", 12),
-        ("QUOTA", 6),
-        ("P.MOD", 7),
-        ("P.MKT", 7),
-        ("EDGE", 8),
-        (f"IC {int(settings.ci_level * 100)}% EDGE", 19),
-        ("AFFID.", 8),
+        (f"IC {int(settings.ci_level * 100)}%" if name == "IC EDGE" else name, w)
+        for name, w in columns
     ]
     lines = [
-        "  ".join(name.ljust(width) for name, width in header),
-        "  ".join("-" * width for _name, width in header),
+        "  ".join(name[:w].ljust(w) for name, w in header),
+        "  ".join("-" * w for _name, w in columns),
     ]
     for row in rows:
         ci = (
-            f"[{row.edge_lo:+.1f}% ; {row.edge_hi:+.1f}%]"
+            f"[{row.edge_lo:+.1f};{row.edge_hi:+.1f}]"
             if row.edge_lo is not None and row.edge_hi is not None
             else f"[p {row.p_model_lo * 100:.0f}-{row.p_model_hi * 100:.0f}%]"
         )
-        cells = [
-            _truncate(row.match_label, 34).ljust(34),
-            _truncate(row.market, 15).ljust(15),
-            _truncate(row.selection, 14).ljust(14),
-            _truncate(row.book, 12).ljust(12),
-            _fmt_odds(row.odds).rjust(6),
-            f"{row.p_model * 100:.1f}%".rjust(7),
-            (_fmt_pct(row.p_market * 100 if row.p_market is not None else None)).rjust(7),
-            (f"{row.edge_pct:+.1f}%" if row.edge_pct is not None else "n/d").rjust(8),
-            ci.ljust(19),
-            row.reliability.ljust(8),
-        ]
+        values = {
+            "PARTITA": (row.match_label, "<"),
+            "MERCATO": (row.market, "<"),
+            "SELEZIONE": (row.selection, "<"),
+            "BOOK": (row.book, "<"),
+            "QUOTA": (_fmt_odds(row.odds), ">"),
+            "P.MOD": (f"{row.p_model * 100:.1f}%", ">"),
+            "P.MKT": (_fmt_pct(row.p_market * 100 if row.p_market is not None else None), ">"),
+            "EDGE": (f"{row.edge_pct:+.1f}%" if row.edge_pct is not None else "n/d", ">"),
+            "IC EDGE": (ci, "<"),
+            "AFFID.": (row.reliability, "<"),
+        }
+        cells = []
+        for name, w in columns:
+            text, align = values[name]
+            text = _truncate(text, w)
+            cells.append(text.rjust(w) if align == ">" else text.ljust(w))
         lines.append("  ".join(cells))
     return "\n".join(lines)
 
@@ -150,17 +204,30 @@ def render_footer(
     parts = [
         SEPARATOR,
         "RIEPILOGO",
-        f"  Righe analizzate           : {total_rows}",
+        f"  Righe con quota (edge)     : {total_rows}",
         f"  di cui bassa affidabilita' : {low_reliability}",
+        f"  Righe senza quota          : {stats.get('unpriced_rows', 0)} "
+        "(solo probabilita' di modello)",
         f"  Partite senza quote        : {stats.get('unmatched', 0)}",
         f"  Chiamate di rete           : {stats.get('network_calls', 0)} "
         f"(cache: {stats.get('cache_hits', 0)})",
     ]
-    if stats.get("odds_requests_remaining") is not None:
-        parts.append(
-            f"  Crediti The Odds API       : {stats['odds_requests_remaining']} rimasti, "
-            f"{stats.get('odds_requests_used', '?')} usati"
-        )
+
+    remaining = stats.get("odds_requests_remaining")
+    if remaining is not None:
+        provider = stats.get("odds_provider") or "provider quote"
+        used = stats.get("odds_requests_used")
+        line = f"  Crediti {provider:<19}: {remaining} rimasti"
+        if used is not None:
+            line += f", {used} usati"
+        parts.append(line)
+        try:
+            if int(str(remaining)) <= 50:
+                parts.append("  ! Crediti quasi esauriti: alza --cache-ttl o riduci "
+                             "il numero di campionati per far durare il piano.")
+        except (TypeError, ValueError):
+            pass
+
     for note in stats.get("api_notes", []) or []:
         parts.append(f"  ! {note}")
     parts += [SEPARATOR, "", LIMITS, SEPARATOR]

@@ -143,6 +143,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     o.add_argument("--env-file", default=None,
                    help="file KEY=VALUE con le chiavi. Se omesso viene cercato "
                         "un .env nella cartella corrente e in quella dello script")
+    o.add_argument("--width", type=int, default=0,
+                   help="larghezza della tabella in caratteri (0 = adatta al "
+                        "terminale, togliendo le colonne meno essenziali)")
     o.add_argument("--verbose", action="store_true")
     o.add_argument("--self-test", action="store_true",
                    help="verifica il modello su dati sintetici, senza rete")
@@ -605,6 +608,8 @@ def run(args: argparse.Namespace) -> int:
         "unmatched": unmatched_total,
         "api_notes": api_notes,
         "righe_nascoste_dal_filtro": hidden,
+        "unpriced_rows": len(unpriced),
+        "odds_provider": provider if odds_client else None,
         "odds_requests_remaining": odds_client.requests_remaining if odds_client else None,
         "odds_requests_used": odds_client.requests_used if odds_client else None,
     }
@@ -612,7 +617,7 @@ def run(args: argparse.Namespace) -> int:
     print(render_header(date_from, date_to, codes, settings, now,
                         provider if odds_client else "nessuno (--model-only)"))
     if shown:
-        print(render_table(shown, settings))
+        print(render_table(shown, settings, width=args.width or None))
     else:
         print("Nessuna riga con quote disponibili per i criteri scelti.")
     if hidden:
@@ -625,7 +630,8 @@ def run(args: argparse.Namespace) -> int:
         print("MERCATI SENZA QUOTA ABBINATA - solo probabilita' di modello, "
               "nessun edge calcolabile")
         print(SEPARATOR)
-        print(render_table(sorted(unpriced, key=lambda r: (r.kickoff, r.match_label)), settings))
+        print(render_table(sorted(unpriced, key=lambda r: (r.kickoff, r.match_label)),
+                           settings, width=args.width or None))
 
     notes = render_notes(rows)
     if notes:

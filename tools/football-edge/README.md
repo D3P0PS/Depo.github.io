@@ -170,6 +170,7 @@ Codici competizione: `SA PL BL1 PD FL1 DED PPL CL ELC SB BL2 SD FL2` (oppure `al
 | `--half-life 30` | più reattivo ai cambi di forma, più rumoroso |
 | `--form-matches 6` | finestra più corta, come da letteratura sulla forma recente |
 | `--offline` | usa solo la cache locale, zero chiamate di rete |
+| `--width 200` | larghezza della tabella: di default si adatta al terminale, togliendo prima `BOOK`, poi `P.MKT`, poi l'intervallo. Edge, probabilità e affidabilità restano sempre |
 | `--btts` | tenta anche il mercato BTTS (su The Odds API richiede un piano a pagamento; in caso di rifiuto degrada da solo) |
 | `--odds-provider` | `sharpapi`, `theoddsapi` o `auto` |
 

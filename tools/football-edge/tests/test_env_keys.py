@@ -87,5 +87,62 @@ class RedactionTest(unittest.TestCase):
                              client._cache_path("https://a/b?apiKey=K2&l=sa"))
 
 
+class TableWidthTest(unittest.TestCase):
+    """La tabella deve entrare nel terminale, non andare a capo."""
+
+    def _row(self, reliability="OK"):
+        import datetime as dt
+        from fbedge.analysis import EdgeRow
+        return EdgeRow(
+            dt.datetime.now(dt.timezone.utc), "SA", "Real Sociedad - Espanyol",
+            "Over/Under 2.5", "Over 2.5", 2.05, "Pinnacle", 4, 0.045,
+            0.69, 0.45, 0.87, 0.52, 41.4, -7.8, 78.3, 17.0, reliability, "",
+            1.7, 1.1, 9, 8,
+        )
+
+    def test_every_line_fits_the_requested_width(self) -> None:
+        from fbedge.config import Settings
+        from fbedge.report import render_table
+        for width in (140, 120, 110, 100, 90, 80):
+            table = render_table([self._row()], Settings(), width=width)
+            for line in table.splitlines():
+                self.assertLessEqual(len(line), width,
+                                     f"riga troppo lunga a {width} colonne: {line!r}")
+
+    def test_essential_columns_are_never_dropped(self) -> None:
+        from fbedge.report import _fit_columns
+        for width in (140, 120, 100, 80, 60):
+            names = [n for n, _w in _fit_columns(width)]
+            for essential in ("PARTITA", "MERCATO", "SELEZIONE", "QUOTA",
+                              "P.MOD", "EDGE", "AFFID."):
+                self.assertIn(essential, names, f"{essential} tolta a {width}")
+
+    def test_reliability_is_still_visible_when_narrow(self) -> None:
+        from fbedge.config import Settings
+        from fbedge.report import render_table
+        table = render_table([self._row("INSUFF.")], Settings(), width=80)
+        self.assertIn("INSUFF.", table)
+
+
+class FooterTest(unittest.TestCase):
+    def test_credits_are_labelled_with_the_provider(self) -> None:
+        from fbedge.config import Settings
+        from fbedge.report import render_footer
+        text = render_footer({"odds_provider": "sharpapi",
+                              "odds_requests_remaining": "431",
+                              "odds_requests_used": "69"}, Settings(), 0, 3)
+        self.assertIn("sharpapi", text)
+        self.assertIn("431 rimasti", text)
+        self.assertIn("69 usati", text)
+
+    def test_missing_usage_counter_is_omitted_not_printed_as_none(self) -> None:
+        from fbedge.config import Settings
+        from fbedge.report import render_footer
+        text = render_footer({"odds_provider": "sharpapi",
+                              "odds_requests_remaining": "11"}, Settings(), 0, 0)
+        self.assertNotIn("None", text)
+        self.assertIn("Crediti quasi esauriti", text)   # 11 <= 50
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -334,9 +334,9 @@ class SharpApiClient:
         raw_events = _as_list(payload)
         if not raw_events:
             result.notes.append(
-                "[sharpapi] risposta ricevuta ma nessun evento riconosciuto nella "
-                "struttura JSON: eseguire --dump-odds e adeguare la mappatura in "
-                "fbedge/sharpapi.py"
+                "[sharpapi] risposta ricevuta ma nessuna lista di eventi "
+                "riconosciuta. Struttura ottenuta:\n"
+                + _indent(summarize_structure(payload, max_depth=2))
             )
             return result
 
@@ -346,10 +346,13 @@ class SharpApiClient:
                 result.events.append(event)
 
         if not result.events:
+            # senza la struttura del primo evento la diagnosi richiederebbe un
+            # altro giro: la si allega subito alla nota
             result.notes.append(
                 f"[sharpapi] {len(raw_events)} eventi ricevuti ma nessuno "
-                "interpretabile (campi squadra/orario/quota non riconosciuti). "
-                "Eseguire --dump-odds."
+                "interpretabile: mancano squadre, orario o quote riconoscibili. "
+                "Struttura del primo evento:\n"
+                + _indent(summarize_structure(raw_events[0], max_depth=3))
             )
         for requested, accepted in self.league_corrections.items():
             result.notes.append(
@@ -454,6 +457,10 @@ def _as_list_field(obj: Dict[str, Any], keys: Iterable[str]) -> List[Any]:
                 out.extend(item)
         return out
     return []
+
+
+def _indent(text: str, prefix: str = "      ") -> str:
+    return "\n".join(prefix + line for line in text.splitlines())
 
 
 def summarize_structure(payload: Any, depth: int = 0, max_depth: int = 4) -> str:

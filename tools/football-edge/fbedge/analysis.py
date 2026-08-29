@@ -58,20 +58,34 @@ class EdgeRow:
 
 # ------------------------------------------------------------- affidabilita'
 def assess_reliability(
-    league: LeagueModel, home_matches: int, away_matches: int, settings: Settings
+    league: LeagueModel,
+    home_matches: int,
+    away_matches: int,
+    settings: Settings,
+    home_name: str = "la squadra di casa",
+    away_name: str = "la squadra in trasferta",
 ) -> Tuple[str, str]:
     reasons: List[str] = []
     low = min(home_matches, away_matches)
 
     if low == 0:
+        # dire quale delle due manca, non solo che manca qualcosa
+        missing = []
+        if home_matches == 0:
+            missing.append(f"{home_name} non ha partite in casa")
+        if away_matches == 0:
+            missing.append(f"{away_name} non ha partite in trasferta")
         return (
             RELIABILITY_NONE,
-            "nessuna partita disponibile nello split casa/trasferta: stima basata "
-            "solo sulla media di lega",
+            " e ".join(missing)
+            + " nel periodo considerato: quel lato della stima viene dalla sola "
+            "media di lega, non dalla squadra. Tipico di neopromosse",
         )
     if low < settings.min_matches:
+        scarce = home_name if home_matches <= away_matches else away_name
+        side = "in casa" if home_matches <= away_matches else "in trasferta"
         reasons.append(
-            f"solo {low} partite nello split casa/trasferta "
+            f"{scarce} ha solo {low} partite {side} "
             f"(minimo consigliato {settings.min_matches}); tipico di neopromosse "
             "o inizio stagione"
         )
@@ -172,7 +186,10 @@ def analyze_fixture(
 
     xg = expected_goals(league, fixture.home_id, fixture.away_id, local)
     model = simulate_fixture(xg, local)
-    reliability, note = assess_reliability(league, xg.home_matches, xg.away_matches, local)
+    reliability, note = assess_reliability(
+        league, xg.home_matches, xg.away_matches, local,
+        fixture.home_name, fixture.away_name,
+    )
 
     label = f"{fixture.home_name} - {fixture.away_name}"
     rows: List[EdgeRow] = []
