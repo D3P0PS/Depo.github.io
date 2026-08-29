@@ -444,6 +444,9 @@ def cmd_dump_odds(args: argparse.Namespace, provider: str, key: str, http: HttpC
         result = client.fetch(comp.odds_sport_key, markets, ttl)
         url, payload = "(The Odds API)", [e.__dict__ for e in result.events[:2]]
     print(f"Campionato richiesto : {comp.name} -> '{league}'")
+    for requested, accepted in getattr(client, "league_corrections", {}).items():
+        print(f"Codice corretto      : '{requested}' -> '{accepted}' "
+              "(suggerito dal provider)")
     # l'URL puo' contenere la chiave con --sharpapi-auth query: va mascherata,
     # perche' questo output e' fatto per essere copiato e condiviso
     print(f"URL                  : {redact(url)}\n")

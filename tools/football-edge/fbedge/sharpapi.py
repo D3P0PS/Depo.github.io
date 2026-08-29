@@ -78,6 +78,36 @@ MARKET_SYNONYMS = {
 }
 
 
+def suggested_value(error_body: str, field: str) -> Optional[str]:
+    """Estrae il "did you mean" dall'errore di filtro non valido.
+
+    SharpAPI, davanti a un valore sbagliato, risponde 400 indicando quello
+    giusto:
+
+        {"error": {"code": "invalid_filter", "details": {"did_you_mean":
+          [{"field": "league", "try": {"league": "serie_a"}, "value": "serie-a"}]}}}
+
+    Vale la pena seguirlo: costa una richiesta e evita di fermarsi per un
+    trattino al posto di un underscore.
+    """
+    try:
+        payload = json.loads(error_body)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    details = ((payload.get("error") or {}).get("details") or {})
+    for item in details.get("did_you_mean") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("field") not in (None, field):
+            continue
+        candidate = (item.get("try") or {}).get(field)
+        if candidate:
+            return str(candidate)
+    return None
+
+
 def _first(obj: Dict[str, Any], keys: Iterable[str]) -> Any:
     for key in keys:
         if isinstance(obj, dict) and obj.get(key) not in (None, ""):
@@ -159,6 +189,9 @@ class SharpApiClient:
         self.requests_remaining: Optional[str] = None
         self.requests_used: Optional[str] = None
         self.unknown_fields: set[str] = set()
+        #: valore richiesto -> valore accettato dal provider, per poter dire
+        #: all'utente cosa correggere nella mappa dei campionati
+        self.league_corrections: Dict[str, str] = {}
 
     # ------------------------------------------------------------ trasporto
     def _auth(self) -> Tuple[Dict[str, str], Dict[str, str]]:
@@ -169,10 +202,25 @@ class SharpApiClient:
             return {"X-API-Key": self.api_key}, {}
         return {"Authorization": f"Bearer {self.api_key}"}, {}
 
-    def _get(self, path: str, params: Dict[str, Any], ttl: int):
+    def _get(self, path: str, params: Dict[str, Any], ttl: int,
+             follow_suggestion: bool = False):
         headers, auth_params = self._auth()
         url = build_url(f"{self.base}{path}", {**params, **auth_params})
-        resp = self.http.get(url, headers, ttl=ttl)
+        try:
+            resp = self.http.get(url, headers, ttl=ttl)
+        except HttpError as exc:
+            requested = params.get(self.league_param)
+            suggestion = (
+                suggested_value(exc.body, self.league_param)
+                if follow_suggestion and exc.status == 400 else None
+            )
+            if not suggestion or suggestion == requested:
+                raise
+            self.league_corrections[str(requested)] = suggestion
+            retry = dict(params)
+            retry[self.league_param] = suggestion
+            url = build_url(f"{self.base}{path}", {**retry, **auth_params})
+            resp = self.http.get(url, headers, ttl=ttl)
         for header, attr in (("x-ratelimit-remaining", "requests_remaining"),
                              ("x-requests-remaining", "requests_remaining"),
                              ("x-ratelimit-used", "requests_used"),
@@ -246,6 +294,7 @@ class SharpApiClient:
             self.odds_path,
             {self.league_param: league_key, "markets": ",".join(markets)},
             ttl,
+            follow_suggestion=True,
         )
 
     # -------------------------------------------------------------- quote
@@ -264,7 +313,8 @@ class SharpApiClient:
         if bookmakers:
             params["bookmakers"] = bookmakers
         try:
-            _url, payload = self._get(self.odds_path, params, ttl)
+            _url, payload = self._get(self.odds_path, params, ttl,
+                                      follow_suggestion=True)
         except HttpError as exc:
             if exc.status in (401, 403):
                 raise HttpError(
@@ -300,6 +350,12 @@ class SharpApiClient:
                 f"[sharpapi] {len(raw_events)} eventi ricevuti ma nessuno "
                 "interpretabile (campi squadra/orario/quota non riconosciuti). "
                 "Eseguire --dump-odds."
+            )
+        for requested, accepted in self.league_corrections.items():
+            result.notes.append(
+                f"[sharpapi] codice campionato corretto dal provider: "
+                f"'{requested}' -> '{accepted}'. Aggiornalo nel file passato a "
+                "--league-map per risparmiare una richiesta a ogni esecuzione."
             )
         result.requests_remaining = self.requests_remaining
         result.requests_used = self.requests_used

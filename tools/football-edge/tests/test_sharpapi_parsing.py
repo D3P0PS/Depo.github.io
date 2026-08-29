@@ -8,6 +8,7 @@ e la mappatura va estesa qui insieme al codice.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
@@ -168,33 +169,33 @@ LEAGUES_PAYLOAD = {
     "data": [
         {"id": "nfl", "display_name": "NFL", "numerical_id": 376,
          "sport": "football", "event_count": 1449, "live_count": 0},
-        {"id": "serie-a", "display_name": "Serie A", "sport": "soccer",
+        {"id": "serie_a", "display_name": "Serie A", "sport": "soccer",
          "event_count": 380},
-        {"id": "brazil-serie-a", "display_name": "Brazil Serie A",
+        {"id": "brazil_serie_a", "display_name": "Brazil Serie A",
          "sport": "soccer", "event_count": 380},
-        {"id": "serie-b", "display_name": "Serie B", "sport": "soccer",
+        {"id": "serie_b", "display_name": "Serie B", "sport": "soccer",
          "event_count": 380},
         {"id": "epl", "display_name": "English Premier League",
          "sport": "soccer", "event_count": 380},
-        {"id": "russia-premier-league", "display_name": "Russia Premier League",
+        {"id": "russia_premier_league", "display_name": "Russia Premier League",
          "sport": "soccer", "event_count": 240},
-        {"id": "efl-championship", "display_name": "EFL Championship",
+        {"id": "efl_championship", "display_name": "EFL Championship",
          "sport": "soccer", "event_count": 552},
         {"id": "bundesliga", "display_name": "Bundesliga", "sport": "soccer",
          "event_count": 306},
-        {"id": "bundesliga-2", "display_name": "2. Bundesliga",
+        {"id": "bundesliga_2", "display_name": "2. Bundesliga",
          "sport": "soccer", "event_count": 306},
         {"id": "laliga", "display_name": "LaLiga", "sport": "soccer",
          "event_count": 380},
-        {"id": "laliga-2", "display_name": "LaLiga 2", "sport": "soccer",
+        {"id": "laliga_2", "display_name": "LaLiga 2", "sport": "soccer",
          "event_count": 462},
-        {"id": "ligue-1", "display_name": "Ligue 1", "sport": "soccer",
+        {"id": "ligue_1", "display_name": "Ligue 1", "sport": "soccer",
          "event_count": 306},
-        {"id": "ligue-2", "display_name": "Ligue 2", "sport": "soccer",
+        {"id": "ligue_2", "display_name": "Ligue 2", "sport": "soccer",
          "event_count": 380},
         {"id": "eredivisie", "display_name": "Eredivisie", "sport": "soccer",
          "event_count": 306},
-        {"id": "primeira-liga", "display_name": "Primeira Liga",
+        {"id": "primeira_liga", "display_name": "Primeira Liga",
          "sport": "soccer", "event_count": 306},
         {"id": "ucl", "display_name": "UEFA Champions League",
          "sport": "soccer", "event_count": 189},
@@ -204,10 +205,10 @@ LEAGUES_PAYLOAD = {
 
 #: cosa deve uscire per ciascun campionato che ci interessa
 EXPECTED = {
-    "SA": "serie-a", "PL": "epl", "BL1": "bundesliga", "PD": "laliga",
-    "FL1": "ligue-1", "DED": "eredivisie", "PPL": "primeira-liga", "CL": "ucl",
-    "ELC": "efl-championship", "SB": "serie-b", "BL2": "bundesliga-2",
-    "SD": "laliga-2", "FL2": "ligue-2",
+    "SA": "serie_a", "PL": "epl", "BL1": "bundesliga", "PD": "laliga",
+    "FL1": "ligue_1", "DED": "eredivisie", "PPL": "primeira_liga", "CL": "ucl",
+    "ELC": "efl_championship", "SB": "serie_b", "BL2": "bundesliga_2",
+    "SD": "laliga_2", "FL2": "ligue_2",
 }
 
 
@@ -237,7 +238,7 @@ class LeagueMatchingTest(unittest.TestCase):
         from fbedge.config import COMPETITIONS
         from fbedge.matching import league_candidates
         # "Serie A" esiste anche in Brasile, "Premier League" anche in Russia
-        for code, intruder in (("SA", "brazil-serie-a"), ("PL", "russia-premier-league")):
+        for code, intruder in (("SA", "brazil_serie_a"), ("PL", "russia_premier_league")):
             comp = COMPETITIONS[code]
             ranked = league_candidates(comp.short_name, comp.country, self.leagues, limit=99)
             ids = [r["id"] for _s, r in ranked]
@@ -249,7 +250,7 @@ class LeagueMatchingTest(unittest.TestCase):
         rows = parser.list_leagues(ttl=0, sport="soccer")
         self.assertEqual(len(rows), 15)                    # l'NFL viene escluso
         self.assertNotIn("nfl", [r["id"] for r in rows])
-        serie_a = next(r for r in rows if r["id"] == "serie-a")
+        serie_a = next(r for r in rows if r["id"] == "serie_a")
         self.assertEqual(serie_a["name"], "Serie A")
         self.assertEqual(serie_a["events"], 380)
 
@@ -258,6 +259,70 @@ class LeagueMatchingTest(unittest.TestCase):
         parser._get = lambda path, params, ttl: ("url", LEAGUES_PAYLOAD)  # type: ignore
         rows = parser.list_leagues(ttl=0, sport="pallanuoto")
         self.assertEqual(len(rows), 16)   # nessun filtro applicabile: li mostra tutti
+
+
+ERROR_BODY = (
+    '{"error":{"code":"invalid_filter","details":{"did_you_mean":'
+    '[{"field":"league","try":{"league":"serie_a"},"value":"serie-a"}],'
+    '"fields":{"league":["serie-a"]},"reference":{"league":"/api/v1/leagues"}},'
+    '"message":"invalid filter values: league=[serie-a]"}}'
+)
+
+
+class FakeHttp:
+    """Accetta solo il codice campionato corretto, come fa il provider vero."""
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = []
+
+    def get(self, url, headers=None, ttl=0):
+        from fbedge.httpcache import HttpError, Response
+        self.calls.append(url)
+        if "league=serie_a" in url:
+            return Response(200, {}, json.dumps(self.payload), from_cache=False)
+        raise HttpError(400, url, ERROR_BODY)
+
+
+class LeagueSuggestionTest(unittest.TestCase):
+    """Un trattino al posto di un underscore non deve fermare l'analisi."""
+
+    def setUp(self) -> None:
+        self.http = FakeHttp({"data": [SHAPE_A["data"][0]]})
+        self.client = SharpApiClient("TEST", self.http)
+
+    def test_wrong_code_is_corrected_and_retried(self) -> None:
+        result = self.client.fetch("serie-a", ["h2h"], ttl=0)
+        self.assertEqual(len(result.events), 1)
+        self.assertEqual(self.client.league_corrections, {"serie-a": "serie_a"})
+        self.assertEqual(len(self.http.calls), 2)          # un solo nuovo tentativo
+        self.assertTrue(any("corretto dal provider" in n for n in result.notes))
+        self.assertTrue(any("serie_a" in n for n in result.notes))
+
+    def test_correct_code_does_not_trigger_a_retry(self) -> None:
+        result = self.client.fetch("serie_a", ["h2h"], ttl=0)
+        self.assertEqual(len(result.events), 1)
+        self.assertEqual(self.client.league_corrections, {})
+        self.assertEqual(len(self.http.calls), 1)
+
+    def test_error_without_suggestion_is_propagated(self) -> None:
+        from fbedge.httpcache import HttpError
+
+        class NoSuggestion(FakeHttp):
+            def get(self, url, headers=None, ttl=0):
+                self.calls.append(url)
+                raise HttpError(400, url, '{"error":{"message":"boom"}}')
+
+        client_ = SharpApiClient("TEST", NoSuggestion({}))
+        with self.assertRaises(HttpError):
+            client_.fetch("qualsiasi", ["h2h"], ttl=0)
+
+    def test_suggestion_parsing_is_defensive(self) -> None:
+        from fbedge.sharpapi import suggested_value
+        self.assertEqual(suggested_value(ERROR_BODY, "league"), "serie_a")
+        self.assertIsNone(suggested_value(ERROR_BODY, "sport"))
+        self.assertIsNone(suggested_value("<html>502</html>", "league"))
+        self.assertIsNone(suggested_value("null", "league"))
 
 
 if __name__ == "__main__":

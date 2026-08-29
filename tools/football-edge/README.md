@@ -82,11 +82,17 @@ codici di The Odds API: vanno scoperti e mappati una volta sola.
 python3 edge_scan.py --odds-provider sharpapi --list-leagues --leagues-out leghe.json
 
 # 2. forma della risposta quote, per verificare la mappatura dei campi
-python3 edge_scan.py --odds-provider sharpapi --dump-odds --league serie-a
+python3 edge_scan.py --odds-provider sharpapi --dump-odds --league serie_a
 
 # 3. da qui in poi, ogni esecuzione
 python3 edge_scan.py --league-map leghe.json --date today
 ```
+
+Se un codice è sbagliato di poco, SharpAPI risponde `400` indicando quello
+giusto (`serie-a` → `serie_a`): lo script segue il suggerimento, ripete la
+richiesta e lo segnala nel riepilogo, così l'analisi non si ferma per un
+trattino. Conviene comunque correggere il file, per risparmiare una richiesta
+a ogni esecuzione.
 
 `--list-leagues` scarica l'elenco completo, lo filtra per sport (`--sport`,
 default `soccer`) e per ogni campionato mostra i tre candidati migliori con un
