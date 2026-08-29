@@ -254,6 +254,14 @@ class LeagueMatchingTest(unittest.TestCase):
         self.assertEqual(serie_a["name"], "Serie A")
         self.assertEqual(serie_a["events"], 380)
 
+    def test_server_side_filter_is_re_verified_locally(self) -> None:
+        # un provider che ignorasse ?sport=soccer restituirebbe anche l'NFL:
+        # il filtro locale deve toglierlo comunque
+        parser = client()
+        parser._get = lambda path, params, ttl: ("url", LEAGUES_PAYLOAD)  # type: ignore
+        rows = parser.list_leagues(ttl=0, sport="soccer")
+        self.assertNotIn("nfl", [r["id"] for r in rows])
+
     def test_unknown_sport_falls_back_instead_of_returning_nothing(self) -> None:
         parser = client()
         parser._get = lambda path, params, ttl: ("url", LEAGUES_PAYLOAD)  # type: ignore

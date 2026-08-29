@@ -323,14 +323,12 @@ class SharpApiClient:
         if sportsbooks:
             params["sportsbook"] = sportsbooks
 
-        server_filtered = bool(params)
         try:
             _url, payload = self._get(LEAGUES_PATH, params, ttl)
         except HttpError as exc:
             if exc.status != 400 or not params:
                 raise
             # filtri non accettati: si scarica tutto e si filtra qui
-            server_filtered = False
             _url, payload = self._get(LEAGUES_PATH, {}, ttl)
 
         rows: List[Dict[str, Any]] = []
@@ -351,9 +349,11 @@ class SharpApiClient:
                 "events": events,
             })
 
-        if not sport or server_filtered:
+        if not sport:
             return rows
 
+        # il filtro lato server viene comunque riverificato qui: un provider
+        # che lo ignorasse invece di rifiutarlo restituirebbe altri sport
         filtered = [r for r in rows if r["sport"].lower() == sport.lower()]
         if not filtered:
             ids = self.sport_league_ids(sport, ttl)
