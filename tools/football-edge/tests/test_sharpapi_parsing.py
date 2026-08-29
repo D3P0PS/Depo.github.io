@@ -199,11 +199,16 @@ LEAGUES_PAYLOAD = {
          "sport": "soccer", "event_count": 29},
         {"id": "spain_-_laliga", "display_name": "Spain - Laliga",
          "sport": "soccer", "event_count": 8},
+        {"id": "spain_-_la_liga", "display_name": "Spain - La Liga",
+         "sport": "soccer", "event_count": 169},
         {"id": "spain_-_laliga_2", "display_name": "Spain - Laliga 2",
          "sport": "soccer", "event_count": 40},
         {"id": "spain_primera_laliga_-_offside",
          "display_name": "Spain Primera Laliga - Offside", "sport": "soccer",
          "event_count": 3},
+        {"id": "spain_primera_laliga_-_home_team_away_team",
+         "display_name": "Spain Primera Laliga - Home Team Away Team",
+         "sport": "soccer", "event_count": 1},
         {"id": "france_-_ligue_1", "display_name": "France - Ligue 1",
          "sport": "soccer", "event_count": 122},
         {"id": "ligue_1", "display_name": "Ligue 1", "sport": "soccer",
@@ -226,8 +231,9 @@ LEAGUES_PAYLOAD = {
 #: cosa deve uscire per ciascun campionato che ci interessa
 EXPECTED = {
     "SA": "italy_-_serie_a", "PL": "england_-_premier_league",
-    "BL1": "germany_-_bundesliga", "PD": "spain_-_laliga",
-    "FL1": "france_-_ligue_1", "DED": "netherlands_-_eredivisie",
+    "BL1": "germany_-_bundesliga",
+    "FL1": "france_-_ligue_1", "PD": "spain_-_la_liga",
+    "DED": "netherlands_-_eredivisie",
     "PPL": "portugal_-_primeira_liga", "CL": "uefa_-_champions_league",
     "ELC": "england_-_championship", "SB": "italy_-_serie_b",
     "BL2": "germany_-_bundesliga_2", "SD": "spain_-_laliga_2",
@@ -278,6 +284,33 @@ class LeagueMatchingTest(unittest.TestCase):
         self.assertEqual(ranked[0][1]["id"], "england_-_premier_league")
         self.assertGreater(ranked[0][0], ranked[1][0])   # niente pareggio a 1.00
 
+    def test_split_and_joined_spelling_are_recognised_as_the_same_league(self) -> None:
+        """'LaLiga' (una parola) e 'La Liga' (due parole) sono lo stesso nome.
+
+        Sul provider reale convivono entrambe le grafie: una stantia con pochi
+        eventi, l'altra quella davvero in uso. Senza normalizzare la
+        spaziatura, 'La Liga' perdeva contro un mercato derivato con lo stesso
+        punteggio di 'LaLiga'.
+        """
+        from fbedge.config import COMPETITIONS
+        from fbedge.matching import league_candidates
+        comp = COMPETITIONS["PD"]
+        ranked = league_candidates(comp.short_name, comp.country, self.leagues, limit=5)
+        top_ids = {r["id"] for _s, r in ranked[:2]}
+        self.assertEqual(top_ids, {"spain_-_laliga", "spain_-_la_liga"})
+        # fra due grafie equivalenti vince quella con piu' eventi quotati
+        self.assertEqual(ranked[0][1]["id"], "spain_-_la_liga")
+
+    def test_home_away_team_market_is_disqualified(self) -> None:
+        """'Home Team Away Team' e' un mercato (chi segna per primo), non una lega."""
+        from fbedge.config import COMPETITIONS
+        from fbedge.matching import league_candidates
+        comp = COMPETITIONS["PD"]
+        ranked = league_candidates(comp.short_name, comp.country, self.leagues, limit=99)
+        trap = next(s for s, r in ranked
+                   if r["id"] == "spain_primera_laliga_-_home_team_away_team")
+        self.assertLess(trap, 0.80)
+
     def test_division_number_is_compared_both_ways(self) -> None:
         from fbedge.config import COMPETITIONS
         from fbedge.matching import league_candidates
@@ -301,7 +334,7 @@ class LeagueMatchingTest(unittest.TestCase):
         parser = client()
         parser._get = lambda path, params, ttl: ("url", LEAGUES_PAYLOAD)  # type: ignore
         rows = parser.list_leagues(ttl=0, sport="soccer")
-        self.assertEqual(len(rows), 22)                    # l'NFL viene escluso
+        self.assertEqual(len(rows), 24)                    # l'NFL viene escluso
         self.assertNotIn("nfl", [r["id"] for r in rows])
         serie_a = next(r for r in rows if r["id"] == "italy_-_serie_a")
         self.assertEqual(serie_a["name"], "Italy - Serie A")
@@ -319,7 +352,7 @@ class LeagueMatchingTest(unittest.TestCase):
         parser = client()
         parser._get = lambda path, params, ttl: ("url", LEAGUES_PAYLOAD)  # type: ignore
         rows = parser.list_leagues(ttl=0, sport="pallanuoto")
-        self.assertEqual(len(rows), 23)   # nessun filtro applicabile: li mostra tutti
+        self.assertEqual(len(rows), 25)   # nessun filtro applicabile: li mostra tutti
 
 
 ERROR_BODY = (

@@ -118,6 +118,17 @@ def _tokens(text: str) -> set:
     return {t for t in re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split() if t}
 
 
+def _joined(text: str) -> str:
+    """Tutti i token incollati insieme, per confrontare 'LaLiga' con 'La Liga'.
+
+    La tokenizzazione tratta i due nomi come completamente diversi (un token
+    contro due), anche se sono lo stesso campionato scritto in modo diverso.
+    Il confronto sulla forma incollata cattura questo caso senza rompere gli
+    altri, dove la spaziatura conta (es. per distinguere due parole diverse).
+    """
+    return "".join(sorted(_tokens(text)))
+
+
 def _division_numbers(tokens: set) -> set:
     """Numeri di divisione presenti, normalizzati: 'ii' e '2' sono lo stesso."""
     out = set()
@@ -155,6 +166,12 @@ def league_candidates(
         name, ident = str(row.get("name", "")), str(row.get("id", ""))
         blob = f"{ident} {name}".lower()
         score = max(name_similarity(short_name, name), name_similarity(short_name, ident))
+        # il nome del candidato include spesso il paese ("Spain - La Liga"):
+        # basta che il nostro nome, incollato, compaia in quello del
+        # candidato, incollato, per riconoscere "LaLiga" dentro "La Liga"
+        our_joined = _joined(short_name)
+        if our_joined and (our_joined in _joined(name) or our_joined in _joined(ident)):
+            score = max(score, 0.97)   # stesso nome, solo spaziato diversamente
 
         if any(alias and alias in blob for alias in aliases):
             score += 0.30                      # nomina il nostro paese

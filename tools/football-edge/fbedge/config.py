@@ -79,7 +79,11 @@ DISQUALIFYING_TOKENS = {
     "offside", "offsides", "corner", "corners", "card", "cards", "booking",
     "bookings", "shot", "shots", "minute", "minutes", "total", "totals",
     "player", "players", "prop", "props", "special", "specials", "outright",
-    "outrights", "winner", "halftime", "half", "handicap", "score",
+    "outrights", "winner", "halftime", "half", "handicap", "score", "scorer",
+    "scorers", "team", "goalscorer", "goalscorers", "correct", "exact",
+    "double", "chance", "draw", "clean", "sheet", "sheets", "first", "last",
+    "method", "combo", "combos", "insurance", "boost", "boosts", "goal",
+    "race", "sending", "off",
     # competizioni diverse
     "women", "womens", "ladies", "femminile", "feminine", "feminina",
     "u23", "u21", "u20", "u19", "u18", "u17", "u16", "youth", "junior",
