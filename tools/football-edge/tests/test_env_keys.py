@@ -10,6 +10,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fbedge.cli import _mask, load_env_file  # noqa: E402
+from fbedge.httpcache import HttpClient, redact  # noqa: E402
 
 SAMPLE = """\
 # commento da ignorare
@@ -61,6 +62,29 @@ class EnvFileTest(unittest.TestCase):
         self.assertNotIn(secret[:8], masked)
         self.assertTrue(masked.endswith(f"({len(secret)} caratteri)"))
         self.assertIn("cdef", masked)          # solo la coda, per riconoscerla
+
+
+class RedactionTest(unittest.TestCase):
+    """La stessa funzione maschera i log e calcola la chiave di cache."""
+
+    def test_secrets_are_masked(self) -> None:
+        for url in ("https://a/b?apiKey=SEGRETO&x=1", "https://a/b?api_key=SEGRETO",
+                    "https://a/b?token=SEGRETO", "https://a/b?secret=SEGRETO"):
+            self.assertNotIn("SEGRETO", redact(url))
+            self.assertIn("***", redact(url))
+
+    def test_ordinary_params_are_untouched(self) -> None:
+        url = "https://a/b?league=serie-a&markets=h2h&key=premier"
+        self.assertEqual(redact(url), url)
+
+    def test_cache_keys_do_not_collide_on_ordinary_params(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = HttpClient(cache_dir=tmp)
+            self.assertNotEqual(client._cache_path("https://a/b?key=serie-a"),
+                                client._cache_path("https://a/b?key=premier"))
+            # due chiavi API diverse devono invece condividere la cache
+            self.assertEqual(client._cache_path("https://a/b?apiKey=K1&l=sa"),
+                             client._cache_path("https://a/b?apiKey=K2&l=sa"))
 
 
 if __name__ == "__main__":

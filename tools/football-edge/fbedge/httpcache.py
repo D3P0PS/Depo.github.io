@@ -33,9 +33,19 @@ class HttpError(RuntimeError):
         super().__init__(f"HTTP {status} su {self.url}: {body[:300]}")
 
 
-def _redact(url: str) -> str:
-    """Non far mai finire una API key nei log o nei messaggi d'errore."""
-    return re.sub(r"(apiKey|api_key|token)=[^&]+", r"\1=***", url)
+#: parametri che contengono un segreto. Solo questi: la funzione serve anche a
+#: calcolare la chiave di cache, e mascherare un parametro qualsiasi (es. "key")
+#: farebbe collassare richieste diverse sulla stessa voce.
+SECRET_PARAMS = "apikey|api_key|api-key|token|access_token|secret|auth"
+
+
+def redact(url: str) -> str:
+    """Non far mai finire una API key nei log, negli errori o nei dump."""
+    return re.sub(rf"(?i)\b({SECRET_PARAMS})=[^&]*", r"\1=***", url)
+
+
+#: alias storico, usato internamente
+_redact = redact
 
 
 @dataclass
