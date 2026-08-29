@@ -27,7 +27,12 @@ from .odds_types import MARKET_BTTS, MARKET_H2H, MARKET_TOTALS
 from .sharpapi import LEAGUES_PATH
 from .sharpapi import DEFAULT_BASE as SHARP_BASE
 from .sharpapi import DEFAULT_ODDS_PATH as SHARP_ODDS_PATH
-from .sharpapi import SharpApiClient, summarize_structure, tier_notes
+from .sharpapi import (
+    SharpApiClient,
+    find_event_list,
+    summarize_structure,
+    tier_notes,
+)
 from .report import (
     SEPARATOR,
     render_footer,
@@ -181,6 +186,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     sh.add_argument("--league", default=None,
                     help="con --dump-odds, id campionato da interrogare "
                          "direttamente, senza passare da --league-map")
+    sh.add_argument("--diagnose-odds", action="store_true",
+                    help="capisce perche' la risposta quote e' vuota, provando "
+                         "le ipotesi una alla volta (usa 3-4 richieste)")
     sh.add_argument("--plan-info", action="store_true",
                     help="stampa per intero i limiti del piano (sport coperti, "
                          "bookmaker, ritardo dei dati) ed esce")
@@ -436,6 +444,103 @@ def cmd_list_leagues(args: argparse.Namespace, provider: str, key: str,
     return 0
 
 
+def cmd_diagnose_odds(args: argparse.Namespace, provider: str, key: str,
+                      http: HttpClient, codes: List[str],
+                      overrides: Dict[str, str], ttl: int) -> int:
+    """Perche' la risposta quote e' vuota: prova le ipotesi in sequenza.
+
+    Una risposta 200 con zero eventi puo' dipendere dal campionato, dal filtro
+    mercati o da cosa il piano include. Le tre cose si distinguono solo
+    variando un parametro alla volta.
+    """
+    if provider != "sharpapi":
+        print("--diagnose-odds e' disponibile solo per SharpAPI.", file=sys.stderr)
+        return 2
+
+    comp = COMPETITIONS[codes[0]]
+    league = args.league or league_key_for(comp, provider, overrides) or "serie_a"
+    client = build_odds_client(args, provider, key, http)
+    param = args.sharpapi_league_param
+
+    print(f"DIAGNOSI QUOTE VUOTE - campionato '{league}'\n")
+
+    # 1) quanti eventi dichiara il catalogo per questo campionato
+    catalogo = None
+    try:
+        rows = client.list_leagues(ttl, sport=args.sport)
+        row = next((r for r in rows if str(r["id"]) == league), None)
+        if row:
+            catalogo = int(row.get("events", 0) or 0)
+            print(f"  1. Catalogo campionati : '{league}' esiste, "
+                  f"{catalogo} eventi dichiarati")
+        else:
+            print(f"  1. Catalogo campionati : '{league}' NON compare fra i "
+                  f"campionati di '{args.sport}'")
+    except HttpError as exc:
+        print(f"  1. Catalogo campionati : non leggibile ({exc.status})")
+
+    # 2-4) stessa richiesta, un filtro in meno alla volta
+    markets = ",".join([MARKET_H2H, MARKET_TOTALS])
+    probes = [
+        ("2. Con campionato e mercati", {param: league, "markets": markets}),
+        ("3. Con campionato, senza mercati", {param: league}),
+        ("4. Senza nessun filtro", {}),
+    ]
+    results: Dict[str, int] = {}
+    leagues_seen: List[str] = []
+    for label, params in probes:
+        try:
+            _url, payload = client._get(client.odds_path, params, ttl)
+        except HttpError as exc:
+            print(f"  {label}: errore {exc.status}")
+            continue
+        _key, events = find_event_list(payload)
+        pagination = payload.get("pagination") if isinstance(payload, dict) else None
+        count = (pagination or {}).get("count", len(events))
+        results[label] = int(count or 0)
+        print(f"  {label}: {count} eventi")
+        if not params and events:
+            for raw in events[:60]:
+                if isinstance(raw, dict):
+                    found = raw.get("league") or raw.get("sport_key") or raw.get("sport")
+                    if found and str(found) not in leagues_seen:
+                        leagues_seen.append(str(found))
+
+    if leagues_seen:
+        print(f"\n  Campionati effettivamente serviti dal piano: "
+              f"{', '.join(leagues_seen[:15])}")
+
+    # verdetto
+    print("\nLETTURA DEI RISULTATI\n")
+    con_tutto = results.get("2. Con campionato e mercati", 0)
+    senza_mercati = results.get("3. Con campionato, senza mercati", 0)
+    senza_filtri = results.get("4. Senza nessun filtro", 0)
+
+    if con_tutto:
+        print("  Le quote arrivano: il problema era altrove, riprova la corsa normale.")
+    elif senza_mercati:
+        print("  Il campionato ha eventi, ma spariscono col filtro mercati: i nomi\n"
+              "  'h2h' e 'totals' non sono quelli usati da questo provider.\n"
+              "  Guarda i mercati presenti con --dump-odds e aggiorna MARKET_SYNONYMS\n"
+              "  in fbedge/sharpapi.py.")
+    elif senza_filtri:
+        print("  Il provider restituisce eventi, ma nessuno di questo campionato.\n"
+              "  Se l'elenco qui sopra e' tutto sport americani, il piano gratuito\n"
+              "  copre solo quelli: per il calcio europeo serve un piano superiore,\n"
+              "  oppure The Odds API (--odds-provider theoddsapi).")
+    elif catalogo:
+        print("  Il catalogo dichiara eventi per questo campionato ma l'endpoint\n"
+              "  quote non ne restituisce nessuno, con o senza filtri. Tipico di un\n"
+              "  piano che elenca tutti i campionati ma serve le quote solo per\n"
+              "  quelli inclusi: i due bookmaker del piano free potrebbero non\n"
+              "  quotare questo campionato.")
+    else:
+        print("  Nessun evento da nessuna combinazione: o non ci sono partite\n"
+              "  quotate adesso, o il piano non include quote per questo sport.")
+    print("\n  Limiti dichiarati dal piano: python3 edge_scan.py --plan-info")
+    return 0
+
+
 def cmd_plan_info(args: argparse.Namespace, provider: str, key: str,
                   http: HttpClient, codes: List[str], overrides: Dict[str, str],
                   ttl: int) -> int:
@@ -551,6 +656,9 @@ def run(args: argparse.Namespace) -> int:
         print(f"--league-map non leggibile: {exc}", file=sys.stderr)
         return 2
 
+    if args.diagnose_odds:
+        return cmd_diagnose_odds(args, provider, odds_key, http, codes, overrides,
+                                 settings.cache_ttl_odds)
     if args.plan_info:
         return cmd_plan_info(args, provider, odds_key, http, codes, overrides,
                              settings.cache_ttl_odds)

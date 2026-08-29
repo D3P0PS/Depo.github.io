@@ -78,8 +78,11 @@ SharpAPI usa id di campionato propri (slug corti tipo `nfl`, `serie-a`), non i
 codici di The Odds API: vanno scoperti e mappati una volta sola.
 
 ```bash
-# 0. cosa copre davvero il tuo piano (sport, bookmaker, ritardo dei dati)
+# 0. cosa copre davvero il tuo piano (bookmaker, ritardo dei dati)
 python3 edge_scan.py --odds-provider sharpapi --plan-info
+
+# 0-bis. se le quote tornano vuote: perche'
+python3 edge_scan.py --odds-provider sharpapi --diagnose-odds --league serie_a
 
 # 1. propone la mappa confrontando i nostri campionati con i loro
 python3 edge_scan.py --odds-provider sharpapi --list-leagues --leagues-out leghe.json
@@ -118,6 +121,11 @@ toccare il codice:
 Se la risposta reale non rientra in nessuna delle forme supportate, `--dump-odds`
 lo rende evidente e la mappatura va estesa in `fbedge/sharpapi.py` (le costanti
 in cima al file) insieme a un caso in `tests/test_sharpapi_parsing.py`.
+
+`--diagnose-odds` serve quando la risposta è valida ma senza eventi: rifà la
+stessa richiesta togliendo un filtro alla volta (mercati, poi campionato) e dal
+confronto stabilisce se il problema è il nome dei mercati, il campionato, o
+cosa il piano include davvero.
 
 Attenzione al piano: SharpAPI dichiara i propri limiti nel campo `meta` di ogni
 risposta, e sul piano gratuito sono stringenti (pochi sport, pochi bookmaker,
@@ -219,6 +227,7 @@ python3 edge_scan.py --self-test         # coerenza matematica + esempio di outp
 python3 -m tests.test_offline_pipeline   # pipeline completa, entrambi i provider
 python3 -m tests.test_sharpapi_parsing   # parser SharpAPI su piu' forme di risposta
 python3 -m tests.test_env_keys           # caricamento delle chiavi da .env
+python3 -m tests.test_diagnose           # diagnosi della risposta quote vuota
 ```
 
 Il self-test verifica fra l'altro che la griglia dei punteggi sommi a 1, che le
