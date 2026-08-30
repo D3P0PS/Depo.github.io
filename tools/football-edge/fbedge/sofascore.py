@@ -84,10 +84,27 @@ class SofaScoreClient:
         _url, payload = self._get(f"/api/v1/search/{query}", {}, ttl)
         return payload
 
-    def scheduled_events(self, date: str, ttl: int = TTL_SCHEDULE) -> Any:
-        """Partite di calcio programmate in una data (YYYY-MM-DD):
-        /api/v1/sport/football/scheduled-events/{date}"""
-        _url, payload = self._get(f"/api/v1/sport/football/scheduled-events/{date}", {}, ttl)
+    def categories_with_events(
+        self, sport: str, date: str, timezone_offset: int = 0, ttl: int = TTL_SCHEDULE,
+    ) -> Any:
+        """Campionati/nazioni con almeno una partita in una data (YYYY-MM-DD):
+        /api/v1/sport/{sport}/{date}/{timezoneOffset}/categories
+
+        Primo passo del flusso ufficiale: non esiste un endpoint diretto
+        'tutte le partite di oggi', va passato per le categorie."""
+        path = f"/api/v1/sport/{sport}/{date}/{timezone_offset}/categories"
+        _url, payload = self._get(path, {}, ttl)
+        return payload
+
+    def category_scheduled_events(
+        self, category_id: int, date: str, ttl: int = TTL_SCHEDULE,
+    ) -> Any:
+        """Partite di una categoria (campionato) in una data (YYYY-MM-DD):
+        /api/v1/category/{id}/scheduled-events/{date}
+
+        Secondo passo del flusso: l'id categoria viene da categories_with_events()."""
+        path = f"/api/v1/category/{category_id}/scheduled-events/{date}"
+        _url, payload = self._get(path, {}, ttl)
         return payload
 
     def live_events(self, ttl: int = 60) -> Any:
@@ -100,7 +117,11 @@ class SofaScoreClient:
         self, team_id: int, page: int = 0, direction: str = "last", ttl: int = TTL_SCHEDULE,
     ) -> Any:
         """Partite recenti o prossime di una squadra:
-        /api/v1/team/{team_id}/events/{last|next}/{page}"""
+        /api/v1/team/{team_id}/events/{last|next}/{page}
+
+        Non confermato dalla documentazione ufficiale vista finora (che copre
+        solo il flusso categorie->eventi): verificare con --ss-team-events
+        prima di usarlo per davvero."""
         direction = direction if direction in ("last", "next") else "last"
         _url, payload = self._get(f"/api/v1/team/{team_id}/events/{direction}/{page}", {}, ttl)
         return payload
@@ -112,9 +133,50 @@ class SofaScoreClient:
         return payload
 
     def event_statistics(self, event_id: int, ttl: int = TTL_PLAYED_EVENT) -> Any:
-        """Statistiche dettagliate di una partita (corner, cartellini, tiri, ...),
+        """Statistiche di squadra di una partita (corner, tiri, possesso, ...),
         disponibili solo a partita iniziata/conclusa: /api/v1/event/{event_id}/statistics"""
         _url, payload = self._get(f"/api/v1/event/{event_id}/statistics", {}, ttl)
+        return payload
+
+    def event_incidents(self, event_id: int, ttl: int = TTL_PLAYED_EVENT) -> Any:
+        """Eventi della partita minuto per minuto - gol, cartellini,
+        sostituzioni, VAR: /api/v1/event/{event_id}/incidents
+
+        E' probabilmente la fonte giusta per i CARTELLINI (le statistiche
+        aggregate a volte non li scompongono per giocatore/minuto)."""
+        _url, payload = self._get(f"/api/v1/event/{event_id}/incidents", {}, ttl)
+        return payload
+
+    def event_lineups(self, event_id: int, ttl: int = TTL_SCHEDULE) -> Any:
+        """Formazioni e statistiche per giocatore: /api/v1/event/{event_id}/lineups"""
+        _url, payload = self._get(f"/api/v1/event/{event_id}/lineups", {}, ttl)
+        return payload
+
+    def standings(
+        self, tournament_id: int, season_id: int, type_: str = "total",
+        ttl: int = TTL_STATIC,
+    ) -> Any:
+        """Classifica di un torneo/stagione:
+        /api/v1/unique-tournament/{id}/season/{seasonId}/standings/{type}
+
+        type_: 'total' (classifica generale), 'home' (solo in casa),
+        'away' (solo in trasferta). tournament_id e season_id si leggono da
+        event['tournament']['uniqueTournament']['id'] e event['season']['id']
+        di un evento gia' recuperato (es. da category_scheduled_events)."""
+        type_ = type_ if type_ in ("total", "home", "away") else "total"
+        path = f"/api/v1/unique-tournament/{tournament_id}/season/{season_id}/standings/{type_}"
+        _url, payload = self._get(path, {}, ttl)
+        return payload
+
+    def event_odds(self, event_id: int, provider_id: int = 1, ttl: int = TTL_SCHEDULE) -> Any:
+        """Quote di un evento per un bookmaker (provider_id, default 1):
+        /api/v1/event/{event_id}/odds/{providerId}/all
+
+        Se questa API offre davvero quote reali per evento, potrebbe coprire
+        anche corner/cartellini come mercati quotati (da verificare: non e'
+        detto che il provider_id=1 copra questi campionati o quei mercati)."""
+        path = f"/api/v1/event/{event_id}/odds/{provider_id}/all"
+        _url, payload = self._get(path, {}, ttl)
         return payload
 
     def probe_raw(self, path: str, params: Dict[str, Any], ttl: int = 300) -> Any:

@@ -81,7 +81,8 @@ modello, nessun edge: senza quote reali l'edge non e' calcolabile).
        export SOFASCORE_API_KEY="la-tua-chiave"
      Prima di usarla, esplora la struttura reale (API non ufficiale):
        python3 edge_scan.py --ss-search "Napoli"
-       python3 edge_scan.py --ss-scheduled 2026-08-30
+       python3 edge_scan.py --ss-categories 2026-08-30
+       python3 edge_scan.py --ss-category-events <ID> --ss-date 2026-08-30
 """
 
 
@@ -231,10 +232,35 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     ss.add_argument("--ss-search", metavar="NOME", default=None,
                     help="cerca squadre/tornei/eventi per nome (per trovarne "
                          "l'id) ed esce")
-    ss.add_argument("--ss-scheduled", metavar="YYYY-MM-DD", default=None,
-                    help="partite di calcio programmate in una data ed esce")
+    ss.add_argument("--ss-categories", metavar="YYYY-MM-DD", default=None,
+                    help="campionati/nazioni con almeno una partita in una "
+                         "data (primo passo per trovare le partite di oggi) ed esce")
+    ss.add_argument("--ss-category-events", metavar="CATEGORY_ID", type=int, default=None,
+                    help="partite di un campionato in una data (usa --ss-date; "
+                         "il CATEGORY_ID viene da --ss-categories) ed esce")
+    ss.add_argument("--ss-date", metavar="YYYY-MM-DD", default=None,
+                    help="data richiesta da --ss-category-events")
     ss.add_argument("--ss-live", action="store_true",
                     help="partite di calcio in corso in questo momento ed esce")
+    ss.add_argument("--ss-incidents", metavar="EVENT_ID", type=int, default=None,
+                    help="eventi minuto per minuto di una partita - gol, "
+                         "cartellini, sostituzioni, VAR - dato il suo id, ed esce")
+    ss.add_argument("--ss-lineups", metavar="EVENT_ID", type=int, default=None,
+                    help="formazioni e statistiche per giocatore di una "
+                         "partita, dato il suo id, ed esce")
+    ss.add_argument("--ss-standings", metavar="TOURNAMENT_ID", type=int, default=None,
+                    help="classifica di un torneo (usa --ss-season e "
+                         "--ss-standings-type) ed esce")
+    ss.add_argument("--ss-season", type=int, default=None,
+                    help="season_id per --ss-standings (si legge da un evento: "
+                         "event['season']['id'])")
+    ss.add_argument("--ss-standings-type", default="total",
+                    choices=["total", "home", "away"],
+                    help="con --ss-standings: classifica generale, solo casa o solo trasferta")
+    ss.add_argument("--ss-odds", metavar="EVENT_ID", type=int, default=None,
+                    help="quote di un evento per un provider (usa --ss-provider) ed esce")
+    ss.add_argument("--ss-provider", type=int, default=1,
+                    help="con --ss-odds, id del bookmaker/provider (default 1)")
     ss.add_argument("--ss-team-events", metavar="TEAM_ID", type=int, default=None,
                     help="partite recenti/prossime di una squadra (usa "
                          "--ss-direction e --ss-page) ed esce")
@@ -799,13 +825,73 @@ def cmd_ss_live(args: argparse.Namespace, http: HttpClient) -> int:
     return 0
 
 
-def cmd_ss_scheduled(args: argparse.Namespace, http: HttpClient) -> int:
+def cmd_ss_categories(args: argparse.Namespace, http: HttpClient) -> int:
     client = ss_client_from_args(args, http)
     if client is None:
         return 2
-    path = f"/api/v1/sport/football/scheduled-events/{args.ss_scheduled}"
+    path = f"/api/v1/sport/football/{args.ss_categories}/0/categories"
     url = build_url(f"{client.base}{path}", {})
-    payload = client.scheduled_events(args.ss_scheduled)
+    payload = client.categories_with_events("football", args.ss_categories)
+    _print_ss_payload(url, payload)
+    return 0
+
+
+def cmd_ss_category_events(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
+    if client is None:
+        return 2
+    if not args.ss_date:
+        print("--ss-category-events richiede --ss-date YYYY-MM-DD.", file=sys.stderr)
+        return 2
+    path = f"/api/v1/category/{args.ss_category_events}/scheduled-events/{args.ss_date}"
+    url = build_url(f"{client.base}{path}", {})
+    payload = client.category_scheduled_events(args.ss_category_events, args.ss_date)
+    _print_ss_payload(url, payload)
+    return 0
+
+
+def cmd_ss_incidents(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
+    if client is None:
+        return 2
+    url = build_url(f"{client.base}/api/v1/event/{args.ss_incidents}/incidents", {})
+    payload = client.event_incidents(args.ss_incidents)
+    _print_ss_payload(url, payload)
+    return 0
+
+
+def cmd_ss_lineups(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
+    if client is None:
+        return 2
+    url = build_url(f"{client.base}/api/v1/event/{args.ss_lineups}/lineups", {})
+    payload = client.event_lineups(args.ss_lineups)
+    _print_ss_payload(url, payload)
+    return 0
+
+
+def cmd_ss_standings(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
+    if client is None:
+        return 2
+    if args.ss_season is None:
+        print("--ss-standings richiede --ss-season.", file=sys.stderr)
+        return 2
+    path = (f"/api/v1/unique-tournament/{args.ss_standings}/season/"
+            f"{args.ss_season}/standings/{args.ss_standings_type}")
+    url = build_url(f"{client.base}{path}", {})
+    payload = client.standings(args.ss_standings, args.ss_season, args.ss_standings_type)
+    _print_ss_payload(url, payload)
+    return 0
+
+
+def cmd_ss_odds(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
+    if client is None:
+        return 2
+    path = f"/api/v1/event/{args.ss_odds}/odds/{args.ss_provider}/all"
+    url = build_url(f"{client.base}{path}", {})
+    payload = client.event_odds(args.ss_odds, args.ss_provider)
     _print_ss_payload(url, payload)
     return 0
 
@@ -867,9 +953,11 @@ def run(args: argparse.Namespace) -> int:
     # i comandi diagnostici di SofaScore non toccano football-data.org ne'
     # i provider di quote: bypassano del tutto i controlli sulle altre chiavi.
     ss_diagnostic = (
-        args.ss_search or args.ss_scheduled or args.ss_live
-        or args.ss_team_events is not None
+        args.ss_search or args.ss_categories or args.ss_category_events is not None
+        or args.ss_live or args.ss_team_events is not None
         or args.ss_event is not None or args.ss_event_stats is not None
+        or args.ss_incidents is not None or args.ss_lineups is not None
+        or args.ss_standings is not None or args.ss_odds is not None
         or args.ss_probe
     )
     if ss_diagnostic:
@@ -877,8 +965,10 @@ def run(args: argparse.Namespace) -> int:
                              verbose=args.verbose)
         if args.ss_search:
             return cmd_ss_search(args, ss_http)
-        if args.ss_scheduled:
-            return cmd_ss_scheduled(args, ss_http)
+        if args.ss_categories:
+            return cmd_ss_categories(args, ss_http)
+        if args.ss_category_events is not None:
+            return cmd_ss_category_events(args, ss_http)
         if args.ss_live:
             return cmd_ss_live(args, ss_http)
         if args.ss_team_events is not None:
@@ -887,6 +977,14 @@ def run(args: argparse.Namespace) -> int:
             return cmd_ss_event(args, ss_http)
         if args.ss_event_stats is not None:
             return cmd_ss_event_stats(args, ss_http)
+        if args.ss_incidents is not None:
+            return cmd_ss_incidents(args, ss_http)
+        if args.ss_lineups is not None:
+            return cmd_ss_lineups(args, ss_http)
+        if args.ss_standings is not None:
+            return cmd_ss_standings(args, ss_http)
+        if args.ss_odds is not None:
+            return cmd_ss_odds(args, ss_http)
         return cmd_ss_probe(args, ss_http)
 
     fd_key = args.football_data_key or os.environ.get("FOOTBALL_DATA_API_KEY", "")
