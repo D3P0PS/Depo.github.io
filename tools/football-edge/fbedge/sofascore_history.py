@@ -138,8 +138,17 @@ def fetch_team_card_history(
     )
 
 
-def top_matches_for_enrichment(rows: Sequence[EdgeRow], max_matches: int) -> List[EdgeRow]:
-    """Le N partite col miglior edge, una per match (non una per mercato)."""
+def top_matches_for_enrichment(
+    rows: Sequence[EdgeRow], max_matches: int, now: Optional[dt.datetime] = None,
+) -> List[EdgeRow]:
+    """Le N partite col miglior edge, una per match (non una per mercato).
+
+    Priorita' a chi deve ancora giocare: su una partita gia' calciata la
+    "verifica statistica" non serve piu' a nessuno, la scommessa non e' piu'
+    piazzabile. Le partite gia' iniziate riempiono solo gli eventuali posti
+    avanzati, non scavalcano mai quelle ancora da giocare.
+    """
+    now = now or dt.datetime.now(dt.timezone.utc)
     best_per_match: Dict[Tuple[dt.datetime, str, str], EdgeRow] = {}
     for row in rows:
         if row.edge_pct is None:
@@ -148,8 +157,16 @@ def top_matches_for_enrichment(rows: Sequence[EdgeRow], max_matches: int) -> Lis
         current = best_per_match.get(key)
         if current is None or row.edge_pct > current.edge_pct:
             best_per_match[key] = row
-    ranked = sorted(best_per_match.values(), key=lambda r: r.edge_pct or 0.0, reverse=True)
-    return ranked[:max_matches]
+
+    upcoming = [r for r in best_per_match.values() if r.kickoff > now]
+    started = [r for r in best_per_match.values() if r.kickoff <= now]
+    upcoming.sort(key=lambda r: r.edge_pct or 0.0, reverse=True)
+    started.sort(key=lambda r: r.edge_pct or 0.0, reverse=True)
+
+    ranked = upcoming[:max_matches]
+    if len(ranked) < max_matches:
+        ranked += started[: max_matches - len(ranked)]
+    return ranked
 
 
 def _split_match_label(label: str) -> Tuple[str, str]:
