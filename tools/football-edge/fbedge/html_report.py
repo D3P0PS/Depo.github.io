@@ -131,6 +131,30 @@ def _table_html(rows: Sequence[EdgeRow], caption: str) -> str:
     </div>"""
 
 
+def _season_start_warning(rows: Sequence[EdgeRow]) -> str:
+    """Avvertenza se il campionato è appena iniziato (pochi dati storici)."""
+    if not rows:
+        return ""
+
+    # Conta quante righe hanno bassa affidabilità per pochi dati
+    low_data = sum(1 for r in rows if r.home_matches < 3 or r.away_matches < 3)
+    total = len(rows)
+
+    if low_data > total * 0.3:  # Se > 30% delle righe ha pochi dati
+        return f"""
+    <div class="banner banner-warn">
+      <h2>⚠ Stagione appena iniziata — dati storici limitati</h2>
+      <p>Il {low_data}/{total} righe (~{low_data*100//total}%) ha meno di 3 partite per split casa/trasferta.
+      Per campionati all'inizio della stagione, i suggerimenti sono:</p>
+      <ul>
+        <li><code>--form-matches 5</code> (default: 10) — meno dati recenti, più peso alla storia</li>
+        <li><code>--half-life 30</code> (default: 60) — attualizza più velocemente ai nuovi risultati</li>
+        <li><code>--market-blend 0.5</code> — ancora più vicino al mercato quando i dati sono pochi</li>
+      </ul>
+    </div>"""
+    return ""
+
+
 def _calibration_html(c: Calibration) -> str:
     if not c.rows:
         return ""
@@ -287,6 +311,7 @@ def render_html(
 
   {notes_block}
   {get_news_alerts(list(rows))}
+  {_season_start_warning(list(rows))}
   {_calibration_html(calibration)}
   {_table_html(rows, "Mercati con quota, per edge decrescente")}
   {_table_html(unpriced, "Mercati senza quota abbinata (solo probabilità di modello)")}

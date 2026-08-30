@@ -10,7 +10,7 @@ import socket
 import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .analysis import EdgeRow, RELIABILITY_OK, analyze_fixture
+from .analysis import EdgeRow, RELIABILITY_OK, RELIABILITY_NONE, analyze_fixture
 from .calibration import assess as assess_calibration
 from .calibration import render as render_calibration
 from .config import COMPETITIONS, DEFAULT_COMPETITIONS, Settings
@@ -124,6 +124,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                    help="filtro opzionale: mostra solo le righe con edge stimato >= "
                         "questa soglia (%%). Senza filtro vengono mostrate anche le "
                         "righe con edge negativo, che sono la maggioranza")
+    k.add_argument("--skip-insufficient", action="store_true",
+                   help="esclude le righe marcate INSUFF. dal report (non hanno abbastanza dati)")
     k.add_argument("--odds-provider", default="auto",
                    choices=["auto", "sharpapi", "theoddsapi"],
                    help="fonte delle quote. 'auto' sceglie in base alle chiavi presenti")
@@ -859,6 +861,11 @@ def run(args: argparse.Namespace) -> int:
     calibration = assess_calibration(priced)
     threshold = settings.min_edge_pct
     kept = priced if threshold is None else [r for r in priced if r.edge_pct >= threshold]
+
+    # Filtra le righe INSUFF. se richiesto
+    if args.skip_insufficient:
+        kept = [r for r in kept if r.reliability != RELIABILITY_NONE]
+
     shown = sorted(kept, key=lambda r: r.sort_key)
     hidden = len(priced) - len(shown)
 
