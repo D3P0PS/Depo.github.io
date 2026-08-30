@@ -21,6 +21,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from .analysis import EdgeRow, RELIABILITY_LOW, RELIABILITY_NONE, RELIABILITY_OK
 from .calibration import Calibration
+from .combos import ComboSuggestion, suggest_combos
 from .config import Settings
 from .news import get_news_alerts
 from .report import LIMITS
@@ -90,7 +91,42 @@ def _market_row_html(row: EdgeRow, allow_slip: bool, group: str) -> str:
       </tr>"""
 
 
-def _table_html(rows: Sequence[EdgeRow], caption: str, allow_slip: bool = False) -> str:
+def _combo_row_html(combos: Sequence[ComboSuggestion], group: str, n_cols: int) -> str:
+    if not combos:
+        return ""
+    items = []
+    for c in combos:
+        a, b = c.legs
+        items.append(f"""
+        <div class="combo-item">
+          <div class="combo-legs">{_esc(a.market)} — {_esc(a.selection)}
+            <span class="combo-plus">+</span> {_esc(b.market)} — {_esc(b.selection)}</div>
+          <div class="combo-stats">
+            <span>Prob. congiunta modello: <strong>{c.joint_prob * 100:.1f}%</strong></span>
+            <span>Quota equa: <strong>{c.fair_odds:.2f}</strong></span>
+          </div>
+        </div>""")
+    body = "".join(items)
+    return f"""
+      <tr class="combo-row market-row" data-group="{group}" hidden>
+        <td colspan="{n_cols}">
+          <div class="combo-box">
+            <div class="combo-title">🧩 Combo suggerite (solo mercati-gol, calcolate dal modello)</div>
+            {body}
+            <p class="combo-hint">Quota equa stimata dalla probabilità congiunta reale del modello,
+            non dal semplice prodotto delle due quote singole: 1X2, Over/Under e BTTS sullo stesso
+            match sono correlati. Non è la quota vera del bet builder: confrontala con quella del
+            tuo bookmaker prima di puntare. Copre solo mercati-gol: corner, cartellini, tiri e primo
+            tempo non sono stimati da questo strumento.</p>
+          </div>
+        </td>
+      </tr>"""
+
+
+def _table_html(
+    rows: Sequence[EdgeRow], caption: str, allow_slip: bool = False,
+    settings: Optional[Settings] = None,
+) -> str:
     if not rows:
         return ""
 
@@ -130,6 +166,10 @@ def _table_html(rows: Sequence[EdgeRow], caption: str, allow_slip: bool = False)
       </tr>""")
         for row in sorted_markets:
             body_lines.append(_market_row_html(row, allow_slip, group=gid))
+
+        if allow_slip and settings is not None:
+            combos = suggest_combos(sorted_markets, settings)
+            body_lines.append(_combo_row_html(combos, gid, n_cols))
 
     body = "\n".join(body_lines)
     slip_header = "<th>Schedina</th>" if allow_slip else ""
@@ -313,6 +353,21 @@ tr.edge-implausible .edge-cell { color: var(--bad-ink); }
 .badge.ok { background: var(--ok-bg); color: var(--pos); border: 1px solid var(--ok-line); }
 .badge.low { background: var(--warn-bg); color: var(--warn-ink); border: 1px solid #e8d180; }
 .badge.none { background: var(--bad-bg); color: var(--bad-ink); border: 1px solid var(--bad-line); }
+
+/* --- combo "bet builder" suggerite (solo mercati-gol) --- */
+.combo-box {
+  background: rgba(47, 111, 79, 0.07); border: 1px dashed var(--accent);
+  border-radius: 10px; padding: 12px 14px; margin: 4px 0;
+}
+.combo-title { font-weight: 700; font-size: 0.82rem; margin-bottom: 8px; }
+.combo-item { padding: 8px 0; border-top: 1px dashed var(--line); }
+.combo-item:first-of-type { border-top: none; padding-top: 0; }
+.combo-legs { font-size: 0.86rem; font-weight: 600; margin-bottom: 4px; }
+.combo-plus { color: var(--muted); margin: 0 4px; font-weight: 400; }
+.combo-stats { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); }
+.combo-stats strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.combo-hint { margin: 10px 0 0; font-size: 0.72rem; color: var(--muted); }
+
 footer {
   margin-top: 28px; padding: 16px 18px; background: var(--panel);
   border: 1px solid var(--line); border-radius: 14px; font-size: 0.84rem; color: var(--muted);
@@ -431,6 +486,10 @@ footer li { margin-bottom: 8px; }
   }
   td.ci { text-align: right; }
   td.ci .note { text-align: right; }
+  tr.combo-row td {
+    display: block; text-align: left; padding: 10px 12px;
+  }
+  tr.combo-row td::before { content: none; }
   .slip-fab { bottom: 16px; right: 16px; }
 }
 """
@@ -702,7 +761,7 @@ def render_html(
   {get_news_alerts(list(rows))}
   {_season_start_warning(list(rows))}
   {_calibration_html(calibration)}
-  {_table_html(rows, "Mercati con quota, per edge decrescente", allow_slip=True)}
+  {_table_html(rows, "Mercati con quota, per edge decrescente", allow_slip=True, settings=settings)}
   {_table_html(unpriced, "Mercati senza quota abbinata (solo probabilità di modello)")}
 
   <footer>

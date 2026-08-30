@@ -56,6 +56,10 @@ class EdgeRow:
     #: quota anomala per una previsione azzeccata.
     edge_price_pct: Optional[float] = None
     edge_model_pct: Optional[float] = None
+    #: id interno del mercato (es. "1X2:home", "OU2.5:over"), usato per
+    #: calcolare combo con probabilita' congiunta esatta. Vuoto per righe
+    #: costruite a mano (es. nei test) che non passano da _make_row.
+    market_id: str = ""
 
     @property
     def sort_key(self) -> Tuple[int, float]:
@@ -317,6 +321,7 @@ def _make_row(
         edge_hi=edge_hi,
         edge_price_pct=edge_price,
         edge_model_pct=edge_model,
+        market_id=market_id,
         delta_pp=delta,
         reliability=reliability,
         reliability_note=reliability_note,
