@@ -153,15 +153,17 @@ def _table_html(
 
         body_lines.append(f"""
       <tr class="match-header" data-group="{gid}" role="button" tabindex="0" aria-expanded="false">
-        <td colspan="{n_cols}" class="match-name">
-          <span class="match-title">{_esc(match_label)}
-            <span class="comp-badge">{_esc(competition)}</span>
-            <span class="kickoff-badge">{_esc(kickoff_str)}</span>
-          </span>
-          <span class="match-right">
-            <span class="match-summary">{summary}</span>
-            <span class="match-toggle-icon">▾</span>
-          </span>
+        <td colspan="{n_cols}">
+          <div class="match-name">
+            <span class="match-title">{_esc(match_label)}
+              <span class="comp-badge">{_esc(competition)}</span>
+              <span class="kickoff-badge">{_esc(kickoff_str)}</span>
+            </span>
+            <span class="match-right">
+              <span class="match-summary">{summary}</span>
+              <span class="match-toggle-icon">▾</span>
+            </span>
+          </div>
         </td>
       </tr>""")
         for row in sorted_markets:
