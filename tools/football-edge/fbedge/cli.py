@@ -236,9 +236,16 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                     help="campionati/nazioni con almeno una partita in una "
                          "data (primo passo per trovare le partite di oggi) ed esce")
     ss.add_argument("--ss-filter", metavar="NOME", default=None,
-                    help="con --ss-categories, mostra solo le nazioni il cui "
-                         "nome contiene questa stringa (es. 'Italy'), invece "
-                         "del JSON grezzo troncato")
+                    help="con --ss-categories, nazioni il cui nome contiene "
+                         "questa stringa; con --ss-category-events, eventi il "
+                         "cui torneo contiene questa stringa - ATTENZIONE: e' "
+                         "un contains, 'Serie A' prende anche 'Serie A Women's "
+                         "Cup' e 'Serie A/B U18'. Per un match esatto usa "
+                         "--ss-tournament-id")
+    ss.add_argument("--ss-tournament-id", metavar="ID", type=int, default=None,
+                    help="con --ss-category-events, mostra solo gli eventi con "
+                         "questo tournament.uniqueTournament.id esatto (piu' "
+                         "affidabile del nome: stabile fra le stagioni)")
     ss.add_argument("--ss-category-events", metavar="CATEGORY_ID", type=int, default=None,
                     help="partite di un campionato in una data (usa --ss-date; "
                          "il CATEGORY_ID viene da --ss-categories) ed esce")
@@ -868,18 +875,30 @@ def cmd_ss_category_events(args: argparse.Namespace, http: HttpClient) -> int:
     url = build_url(f"{client.base}{path}", {})
     payload = client.category_scheduled_events(args.ss_category_events, args.ss_date)
 
-    if args.ss_filter:
+    if args.ss_filter or args.ss_tournament_id is not None:
         # una "categoria" (nazione) mescola tutte le competizioni: Serie A,
-        # Serie B, Coppa Italia, ... va filtrata per nome torneo, non per
-        # nome nazione (gia' scelto scegliendo il category_id)
-        needle = args.ss_filter.strip().lower()
+        # Serie B, Coppa Italia, Serie A Women's Cup, Serie A/B U18, ... un
+        # match per sottostringa sul nome prende anche i tornei omonimi:
+        # per isolare esattamente il campionato serve l'id, non il nome.
         items = payload.get("events", []) if isinstance(payload, dict) else []
-        matches = [
-            ev for ev in items
-            if needle in ev.get("tournament", {}).get("name", "").lower()
-        ]
+        matches = items
+        label_parts = []
+        if args.ss_tournament_id is not None:
+            matches = [
+                ev for ev in matches
+                if ev.get("tournament", {}).get("uniqueTournament", {}).get("id")
+                == args.ss_tournament_id
+            ]
+            label_parts.append(f"uniqueTournamentId={args.ss_tournament_id}")
+        if args.ss_filter:
+            needle = args.ss_filter.strip().lower()
+            matches = [
+                ev for ev in matches
+                if needle in ev.get("tournament", {}).get("name", "").lower()
+            ]
+            label_parts.append(f"torneo contiene '{args.ss_filter}'")
         print(f"URL                  : {redact(url)}\n")
-        print(f"{len(matches)}/{len(items)} eventi con torneo che contiene '{args.ss_filter}':\n")
+        print(f"{len(matches)}/{len(items)} eventi con {' e '.join(label_parts)}:\n")
         for ev in matches:
             tour = ev.get("tournament", {})
             unique = tour.get("uniqueTournament", {})
