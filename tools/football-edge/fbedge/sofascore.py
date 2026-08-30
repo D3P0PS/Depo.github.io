@@ -184,3 +184,42 @@ class SofaScoreClient:
         path = path if path.startswith("/") else f"/{path}"
         _url, payload = self._get(path, params, ttl)
         return payload
+
+
+#: valori di incidentClass osservati per i cartellini. "yellowRed" e' il
+#: secondo giallo che diventa espulsione: conta come rosso, non come giallo
+#: aggiuntivo, altrimenti si conterebbe un cartellino di troppo.
+_RED_CARD_CLASSES = {"red", "yellowRed"}
+_YELLOW_CARD_CLASSES = {"yellow"}
+
+
+def parse_card_totals(incidents_payload: Any) -> Optional[Dict[str, int]]:
+    """Conta i cartellini per squadra da /event/{id}/incidents.
+
+    Confermato su una risposta reale (Fiorentina-Frosinone, 2026-08-30):
+    ogni cartellino e' un elemento con incidentType == "card", isHome (bool)
+    e incidentClass ("yellow" | "red" | "yellowRed" per il secondo giallo).
+
+    Ritorna {"home_yellow", "home_red", "away_yellow", "away_red"}, oppure
+    None se il payload non ha la forma attesa (partita non ancora iniziata,
+    o l'API ha cambiato struttura): meglio niente dato che un dato sbagliato
+    spacciato per giusto.
+    """
+    if not isinstance(incidents_payload, dict):
+        return None
+    incidents = incidents_payload.get("incidents")
+    if not isinstance(incidents, list):
+        return None
+
+    counts = {"home_yellow": 0, "home_red": 0, "away_yellow": 0, "away_red": 0}
+    for item in incidents:
+        if not isinstance(item, dict) or item.get("incidentType") != "card":
+            continue
+        side = "home" if item.get("isHome") else "away"
+        card_class = item.get("incidentClass")
+        if card_class in _RED_CARD_CLASSES:
+            counts[f"{side}_red"] += 1
+        elif card_class in _YELLOW_CARD_CLASSES:
+            counts[f"{side}_yellow"] += 1
+        # classi non riconosciute vengono ignorate, non contate a caso
+    return counts
