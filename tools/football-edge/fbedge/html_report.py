@@ -25,6 +25,7 @@ from .combos import ComboSuggestion, suggest_combos
 from .config import Settings
 from .news import get_news_alerts
 from .report import LIMITS
+from .sofascore_history import MatchCardCheck
 
 _RELIABILITY_CLASS = {
     RELIABILITY_OK: "ok",
@@ -216,6 +217,62 @@ def _season_start_warning(rows: Sequence[EdgeRow]) -> str:
     return ""
 
 
+def _freshness_badge(stats) -> str:
+    age = stats.age_days()
+    if age < 1:
+        label = "aggiornato oggi"
+    elif age < 2:
+        label = "aggiornato ieri"
+    else:
+        label = f"aggiornato {int(age)} giorni fa"
+    cls = "stale" if stats.is_stale() else "fresh"
+    if stats.is_stale():
+        label += " — potrebbe non riflettere la forma recente"
+    return f'<span class="freshness {cls}">{_esc(label)}</span>'
+
+
+def _card_check_team_html(name: str, stats) -> str:
+    if stats is None:
+        return f'<div class="card-check-team"><span class="card-check-name">{_esc(name)}</span>' \
+               f'<span class="card-check-stats">dati non disponibili</span></div>'
+    return f"""
+        <div class="card-check-team">
+          <span class="card-check-name">{_esc(stats.team_name)}</span>
+          <span class="card-check-stats">{stats.yellow_avg:.1f} gialli/partita &middot;
+          {stats.red_avg:.1f} rossi/partita ({stats.matches_used} partite)</span>
+          {_freshness_badge(stats)}
+        </div>"""
+
+
+def _card_checks_html(card_checks: Dict[str, MatchCardCheck]) -> str:
+    if not card_checks:
+        return ""
+    items = []
+    for match_label, check in card_checks.items():
+        if check.note and check.home is None and check.away is None:
+            items.append(f"""
+      <div class="card-check-item">
+        <div class="card-check-match">{_esc(match_label)}</div>
+        <div class="card-check-unavailable">{_esc(check.note)}</div>
+      </div>""")
+            continue
+        note_html = f'<div class="card-check-note">{_esc(check.note)}</div>' if check.note else ""
+        home_label, _, away_label = match_label.partition(" - ")
+        items.append(f"""
+      <div class="card-check-item">
+        <div class="card-check-match">{_esc(match_label)}</div>
+        {_card_check_team_html(home_label, check.home)}
+        {_card_check_team_html(away_label, check.away)}
+        {note_html}
+      </div>""")
+    body = "".join(items)
+    return f"""
+    <h2>🃏 Verifica statistica — cartellini sulle top partite</h2>
+    <p class="section-hint">Media sulle ultime partite giocate da ciascuna squadra (fonte: SofaScore).
+    Non è un edge calcolato, è un riscontro aggiuntivo da leggere insieme alla stima sui gol qui sotto.</p>
+    <div class="card-check-grid">{body}</div>"""
+
+
 def _calibration_html(c: Calibration) -> str:
     if not c.rows:
         return ""
@@ -369,6 +426,27 @@ tr.edge-implausible .edge-cell { color: var(--bad-ink); }
 .combo-stats { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); }
 .combo-stats strong { color: var(--ink); font-variant-numeric: tabular-nums; }
 .combo-hint { margin: 10px 0 0; font-size: 0.72rem; color: var(--muted); }
+
+/* --- verifica statistica cartellini (top partite) --- */
+.section-hint { color: var(--muted); font-size: 0.84rem; margin: -6px 0 12px; }
+.card-check-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px; margin-bottom: 20px;
+}
+.card-check-item {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px; box-shadow: var(--shadow);
+}
+.card-check-match { font-weight: 700; font-size: 0.9rem; margin-bottom: 10px; }
+.card-check-team { padding: 8px 0; border-top: 1px dashed var(--line); }
+.card-check-team:first-of-type { border-top: none; padding-top: 0; }
+.card-check-name { display: block; font-weight: 600; font-size: 0.85rem; }
+.card-check-stats { display: block; color: var(--muted); font-size: 0.8rem; margin: 2px 0; }
+.card-check-unavailable { color: var(--muted); font-size: 0.82rem; font-style: italic; }
+.card-check-note { margin-top: 8px; font-size: 0.76rem; color: var(--warn-ink); }
+.freshness { font-size: 0.72rem; font-weight: 600; }
+.freshness.fresh { color: var(--pos); }
+.freshness.stale { color: var(--warn-ink); }
 
 footer {
   margin-top: 28px; padding: 16px 18px; background: var(--panel);
@@ -722,6 +800,7 @@ def render_html(
     competitions: Sequence[str],
     odds_provider: str,
     generated_at: dt.datetime,
+    card_checks: Optional[Dict[str, MatchCardCheck]] = None,
 ) -> str:
     limits_html = "".join(
         f"<li>{_esc(line.strip())}</li>"
@@ -762,6 +841,7 @@ def render_html(
   {notes_block}
   {get_news_alerts(list(rows))}
   {_season_start_warning(list(rows))}
+  {_card_checks_html(card_checks or {})}
   {_calibration_html(calibration)}
   {_table_html(rows, "Mercati con quota, per edge decrescente", allow_slip=True, settings=settings)}
   {_table_html(unpriced, "Mercati senza quota abbinata (solo probabilità di modello)")}

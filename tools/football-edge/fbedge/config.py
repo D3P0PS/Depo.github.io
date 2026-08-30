@@ -24,6 +24,13 @@ class Competition:
     #: sono slug propri (es. "nfl"), da scoprire con --list-leagues e passare
     #: con --league-map.
     sharpapi_league: Optional[str] = None
+    #: id di categoria (nazione) e di torneo (uniqueTournament) su SofaScore,
+    #: per le statistiche extra (cartellini). None = non ancora scoperti:
+    #: quel campionato semplicemente non mostra la sezione statistiche extra,
+    #: invece di rischiare un id indovinato a memoria e sbagliato. Si scoprono
+    #: con --ss-categories/--ss-category-events (vedi fbedge/sofascore.py).
+    sofascore_category_id: Optional[int] = None
+    sofascore_tournament_id: Optional[int] = None
 
     def league_key(self, provider: str) -> Optional[str]:
         if provider == "sharpapi":
@@ -31,15 +38,19 @@ class Competition:
         return self.odds_sport_key
 
 
-def _c(code, name, short_name, country, odds_key, free_tier, tier):
-    return Competition(code, name, short_name, country, odds_key, free_tier, tier)
+def _c(code, name, short_name, country, odds_key, free_tier, tier,
+      sofascore_category_id=None, sofascore_tournament_id=None):
+    return Competition(code, name, short_name, country, odds_key, free_tier, tier,
+                       sofascore_category_id=sofascore_category_id,
+                       sofascore_tournament_id=sofascore_tournament_id)
 
 
 COMPETITIONS: Dict[str, Competition] = {
     c.code: c
     for c in [
         # --- prime divisioni (tutte nel piano free di football-data.org) ---
-        _c("SA",  "Serie A (ITA)",        "Serie A",        "Italy",       "soccer_italy_serie_a",          True, 1),
+        _c("SA",  "Serie A (ITA)",        "Serie A",        "Italy",       "soccer_italy_serie_a",          True, 1,
+           sofascore_category_id=31, sofascore_tournament_id=23),  # confermati su dati reali il 2026-08-30
         _c("PL",  "Premier League (ENG)", "Premier League", "England",     "soccer_epl",                    True, 1),
         _c("BL1", "Bundesliga (GER)",     "Bundesliga",     "Germany",     "soccer_germany_bundesliga",     True, 1),
         _c("PD",  "La Liga (ESP)",        "LaLiga",         "Spain",       "soccer_spain_la_liga",          True, 1),

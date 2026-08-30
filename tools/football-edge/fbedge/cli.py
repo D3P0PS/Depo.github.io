@@ -13,6 +13,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from .analysis import EdgeRow, RELIABILITY_OK, RELIABILITY_NONE, analyze_fixture
 from .sofascore import SofaScoreClient
 from .sofascore import DEFAULT_HOST as SS_DEFAULT_HOST
+from .sofascore_cache import load_cache as ss_load_cache
+from .sofascore_cache import save_cache as ss_save_cache
+from .sofascore_history import enrich_top_matches
 from .calibration import assess as assess_calibration
 from .calibration import render as render_calibration
 from .config import COMPETITIONS, DEFAULT_COMPETITIONS, Settings
@@ -294,6 +297,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     ss.add_argument("--ss-host", default=SS_DEFAULT_HOST,
                     help="header x-rapidapi-host da inviare (cambialo solo se "
                          "il tuo abbonamento RapidAPI usa un host diverso)")
+    ss.add_argument("--ss-no-enrich", action="store_true",
+                    help="disattiva la verifica statistica cartellini sulle top "
+                         "partite nel report HTML, anche se SOFASCORE_API_KEY e' impostata")
+    ss.add_argument("--ss-top-n", type=int, default=5,
+                    help="quante partite del giorno (per edge migliore) ricevono "
+                         "la verifica statistica cartellini")
+    ss.add_argument("--ss-max-requests", type=int, default=60,
+                    help="tetto di chiamate SofaScore per corsa, per non sforare "
+                         "il budget del piano gratuito RapidAPI")
     return p.parse_args(argv)
 
 
@@ -1275,10 +1287,26 @@ def run(args: argparse.Namespace) -> int:
             # questo file, non l'intero /tmp
             run_dir = tempfile.mkdtemp(prefix="football-edge-")
             html_path = os.path.join(run_dir, "report.html")
+        card_checks = {}
+        sofascore_key = args.sofascore_key or os.environ.get("SOFASCORE_API_KEY", "")
+        if sofascore_key and not args.ss_no_enrich:
+            ss_client = SofaScoreClient(sofascore_key, http, host=args.ss_host)
+            ss_cache = ss_load_cache(args.cache_dir)
+            try:
+                card_checks = enrich_top_matches(
+                    shown, ss_client, ss_cache,
+                    max_matches=args.ss_top_n, max_requests=args.ss_max_requests,
+                )
+            except HttpError as exc:
+                print(f"! Verifica statistica SofaScore non riuscita: {exc}", file=sys.stderr)
+            finally:
+                ss_save_cache(args.cache_dir, ss_cache)
+
         page = render_html(
             shown, unpriced, calibration, stats, settings,
             date_from, date_to, codes,
             provider if odds_client else "nessuno (--model-only)", now,
+            card_checks=card_checks,
         )
         with open(html_path, "w", encoding="utf-8") as fh:
             fh.write(page)
