@@ -117,9 +117,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     k = p.add_argument_group("mercato")
     k.add_argument("--devig", default="shin", choices=["shin", "multiplicative", "power"],
                    help="metodo di rimozione del margine bookmaker")
-    k.add_argument("--market-blend", type=float, default=0.0,
+    k.add_argument("--market-blend", type=float, default=0.3,
                    help="0 = solo modello, 1 = solo mercato. Valori 0.2-0.4 "
-                        "riducono l'eccesso di fiducia nel modello")
+                        "riducono l'eccesso di fiducia nel modello (default: 0.3)")
     k.add_argument("--min-edge", type=float, default=None,
                    help="filtro opzionale: mostra solo le righe con edge stimato >= "
                         "questa soglia (%%). Senza filtro vengono mostrate anche le "

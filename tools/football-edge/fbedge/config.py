@@ -109,16 +109,20 @@ COUNTRY_HINTS = [
     "ecuador", "bolivia", "venezuela", "saudi", "qatar", "emirates", "morocco",
 ]
 
-# Tutte le competizioni del piano gratuito di football-data.org, non solo le
-# cinque principali: la specifica chiede esplicitamente le seconde divisioni
-# quando il piano free le copre, ed e' il caso della Championship inglese.
-# Le seconde divisioni a pagamento (SB, BL2, SD, FL2) restano fuori dal
-# default: senza un piano superiore, football-data.org le rifiuta con 403 a
-# ogni corsa, e includerle di default vorrebbe dire stampare quel rifiuto a
-# chi non le ha mai chieste. Restano raggiungibili con --competitions all
+# Default: leghe principali europee (Tier 1) + Champions League + Championship.
+# Esclude le seconde divisioni per evitare calibrazione sospetta con pochi dati.
+# Tutte le competizioni restano raggiungibili con --competitions all
 # o elencandole esplicitamente.
 DEFAULT_COMPETITIONS: List[str] = [
-    code for code, comp in COMPETITIONS.items() if comp.free_tier
+    "SA",  # Serie A (ITA)
+    "PL",  # Premier League (ENG)
+    "BL1",  # Bundesliga (GER)
+    "PD",  # La Liga (ESP)
+    "FL1",  # Ligue 1 (FRA)
+    "DED",  # Eredivisie (NED)
+    "PPL",  # Primeira Liga (POR)
+    "CL",  # Champions League
+    "ELC",  # Championship (ENG)
 ]
 
 
@@ -146,7 +150,7 @@ class Settings:
 
     # --- confronto con il mercato ---
     devig_method: str = "shin"      # shin | multiplicative | power
-    market_blend: float = 0.0       # 0 = solo modello, 1 = solo mercato
+    market_blend: float = 0.3       # 0 = solo modello, 1 = solo mercato (default: 0.3 riduce eccesso di fiducia)
     min_edge_pct: Optional[float] = None   # filtro opzionale sull'edge mostrato
 
     # --- incertezza ---
