@@ -80,6 +80,28 @@ def _fit_columns(width: int) -> List[Tuple[str, int]]:
     return columns
 
 
+def _group_by_match(rows: Sequence[EdgeRow]) -> List[Tuple[str, List[EdgeRow]]]:
+    """Raggruppa le righe per match, ordinate per edge decrescente."""
+    from collections import defaultdict
+    groups: Dict[Tuple[dt.datetime, str, str], List[EdgeRow]] = defaultdict(list)
+
+    for row in rows:
+        key = (row.kickoff, row.competition, row.match_label)
+        groups[key].append(row)
+
+    # Ordina i mercati dentro ogni match per edge decrescente
+    result = []
+    for (kickoff, competition, match_label), market_rows in sorted(groups.items()):
+        sorted_markets = sorted(
+            market_rows,
+            key=lambda r: (0, -r.edge_pct) if r.edge_pct is not None else (1, 0.0),
+            reverse=False
+        )
+        result.append((match_label, sorted_markets))
+
+    return result
+
+
 def render_table(rows: Sequence[EdgeRow], settings: Settings,
                  width: Optional[int] = None) -> str:
     columns = _fit_columns(width or terminal_width())
@@ -88,34 +110,46 @@ def render_table(rows: Sequence[EdgeRow], settings: Settings,
         (f"IC {int(settings.ci_level * 100)}%" if name == "IC EDGE" else name, w)
         for name, w in columns
     ]
+
     lines = [
         "  ".join(name[:w].ljust(w) for name, w in header),
         "  ".join("-" * w for _name, w in columns),
     ]
-    for row in rows:
-        ci = (
-            f"[{row.edge_lo:+.1f};{row.edge_hi:+.1f}]"
-            if row.edge_lo is not None and row.edge_hi is not None
-            else f"[p {row.p_model_lo * 100:.0f}-{row.p_model_hi * 100:.0f}%]"
-        )
-        values = {
-            "PARTITA": (row.match_label, "<"),
-            "MERCATO": (row.market, "<"),
-            "SELEZIONE": (row.selection, "<"),
-            "BOOK": (row.book, "<"),
-            "QUOTA": (_fmt_odds(row.odds), ">"),
-            "P.MOD": (f"{row.p_model * 100:.1f}%", ">"),
-            "P.MKT": (_fmt_pct(row.p_market * 100 if row.p_market is not None else None), ">"),
-            "EDGE": (f"{row.edge_pct:+.1f}%" if row.edge_pct is not None else "n/d", ">"),
-            "IC EDGE": (ci, "<"),
-            "AFFID.": (row.reliability, "<"),
-        }
-        cells = []
-        for name, w in columns:
-            text, align = values[name]
-            text = _truncate(text, w)
-            cells.append(text.rjust(w) if align == ">" else text.ljust(w))
-        lines.append("  ".join(cells))
+
+    grouped = _group_by_match(rows)
+
+    for match_label, market_rows in grouped:
+        for i, row in enumerate(market_rows):
+            # Mostra il nome della partita solo sulla prima riga del match
+            display_match = match_label if i == 0 else ""
+
+            ci = (
+                f"[{row.edge_lo:+.1f};{row.edge_hi:+.1f}]"
+                if row.edge_lo is not None and row.edge_hi is not None
+                else f"[p {row.p_model_lo * 100:.0f}-{row.p_model_hi * 100:.0f}%]"
+            )
+            values = {
+                "PARTITA": (display_match, "<"),
+                "MERCATO": (row.market, "<"),
+                "SELEZIONE": (row.selection, "<"),
+                "BOOK": (row.book, "<"),
+                "QUOTA": (_fmt_odds(row.odds), ">"),
+                "P.MOD": (f"{row.p_model * 100:.1f}%", ">"),
+                "P.MKT": (_fmt_pct(row.p_market * 100 if row.p_market is not None else None), ">"),
+                "EDGE": (f"{row.edge_pct:+.1f}%" if row.edge_pct is not None else "n/d", ">"),
+                "IC EDGE": (ci, "<"),
+                "AFFID.": (row.reliability, "<"),
+            }
+            cells = []
+            for name, w in columns:
+                text, align = values[name]
+                text = _truncate(text, w)
+                cells.append(text.rjust(w) if align == ">" else text.ljust(w))
+            lines.append("  ".join(cells))
+
+        # Riga vuota tra match
+        lines.append("")
+
     return "\n".join(lines)
 
 

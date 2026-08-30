@@ -65,7 +65,57 @@ def _row_html(r: EdgeRow) -> str:
 def _table_html(rows: Sequence[EdgeRow], caption: str) -> str:
     if not rows:
         return ""
-    body = "\n".join(_row_html(r) for r in rows)
+
+    # Raggruppa per match (kickoff, competition, match_label)
+    from collections import defaultdict
+    groups: Dict[tuple, List[EdgeRow]] = defaultdict(list)
+    for row in rows:
+        key = (row.kickoff, row.competition, row.match_label)
+        groups[key].append(row)
+
+    # Ordina i mercati dentro ogni match per edge decrescente
+    body_lines = []
+    for (kickoff, competition, match_label), market_rows in sorted(groups.items()):
+        sorted_markets = sorted(
+            market_rows,
+            key=lambda r: (0, -r.edge_pct) if r.edge_pct is not None else (1, 0.0),
+            reverse=False
+        )
+
+        # Aggiungi riga header per il match
+        body_lines.append(f"""
+      <tr class="match-header">
+        <td colspan="9" class="match-name">{_esc(match_label)} <span class="comp-badge">{_esc(competition)}</span></td>
+      </tr>""")
+
+        # Aggiungi le righe dei mercati (senza il nome della partita ripetuto)
+        for row in sorted_markets:
+            # Modifica la row per non mostrare il match_label (vuoto)
+            ci = (
+                f"{row.edge_lo:+.1f}% ; {row.edge_hi:+.1f}%"
+                if row.edge_lo is not None and row.edge_hi is not None
+                else f"p {row.p_model_lo * 100:.0f}–{row.p_model_hi * 100:.0f}%"
+            )
+            odds = f"{row.odds:.2f}" if row.odds else "–"
+            market_p = f"{row.p_market * 100:.1f}%" if row.p_market is not None else "–"
+            edge = f"{row.edge_pct:+.1f}%" if row.edge_pct is not None else "–"
+            rel_class = _RELIABILITY_CLASS.get(row.reliability, "low")
+            note = f'<div class="note">{_esc(row.note)}</div>' if row.note else ""
+            body_lines.append(f"""
+      <tr class="{_edge_class(row.edge_pct)}">
+        <td></td>
+        <td>{_esc(row.market)}</td>
+        <td>{_esc(row.selection)}</td>
+        <td class="num">{odds}</td>
+        <td class="num">{row.p_model * 100:.1f}%</td>
+        <td class="num">{market_p}</td>
+        <td class="num edge-cell">{edge}</td>
+        <td class="ci">{_esc(ci)}{note}</td>
+        <td><span class="badge {rel_class}">{_esc(row.reliability)}</span>
+            {f'<div class="note">{_esc(row.reliability_note)}</div>' if row.reliability_note else ""}</td>
+      </tr>""")
+
+    body = "\n".join(body_lines)
     return f"""
     <h2>{_esc(caption)}</h2>
     <div class="table-wrap">
@@ -158,6 +208,10 @@ td.match .comp { display: block; color: var(--muted); font-size: 0.76rem; }
 td.ci { white-space: normal; color: var(--muted); font-size: 0.82rem; min-width: 160px; }
 .note { color: var(--muted); font-size: 0.78rem; margin-top: 2px; white-space: normal; }
 .edge-cell { font-weight: 600; }
+tr.match-header { background: #f0ede8; border: 1px solid var(--line); }
+tr.match-header td { padding: 12px; font-weight: 600; color: var(--ink); }
+.match-name { font-size: 0.98rem; }
+.comp-badge { display: inline-block; margin-left: 8px; padding: 2px 8px; background: var(--accent); color: white; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
 tr.edge-pos .edge-cell { color: var(--pos); }
 tr.edge-neg .edge-cell { color: var(--neg); }
 tr.edge-implausible { background: var(--bad-bg); }
