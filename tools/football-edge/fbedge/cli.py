@@ -11,10 +11,8 @@ import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .analysis import EdgeRow, RELIABILITY_OK, RELIABILITY_NONE, analyze_fixture
-from .api_football import ApiFootballClient
-from .api_football import DEFAULT_BASE as AF_DEFAULT_BASE
-from .api_football import DEFAULT_RAPIDAPI_BASE as AF_RAPIDAPI_BASE
-from .api_football import DEFAULT_RAPIDAPI_HOST as AF_RAPIDAPI_HOST
+from .sofascore import SofaScoreClient
+from .sofascore import DEFAULT_HOST as SS_DEFAULT_HOST
 from .calibration import assess as assess_calibration
 from .calibration import render as render_calibration
 from .config import COMPETITIONS, DEFAULT_COMPETITIONS, Settings
@@ -78,15 +76,12 @@ file con le variabili passato con --env-file.
 Senza chiave quote si puo' comunque usare --model-only (probabilita' del
 modello, nessun edge: senza quote reali l'edge non e' calcolabile).
 
-  3) Statistiche extra (opzionale) - API-Football, corner/cartellini
-     Piano gratuito su https://www.api-football.com/ (accesso diretto)
-     oppure via RapidAPI (stesso servizio, chiave diversa):
-       export API_FOOTBALL_KEY="la-tua-chiave"
-     Se la chiave viene da RapidAPI aggiungi anche --af-via-rapidapi
-     (o export API_FOOTBALL_RAPIDAPI_HOST=... se il tuo host differisce
-     da quello di default).
-     Prima di usarla: python3 edge_scan.py --af-status [--af-via-rapidapi]
-     per vedere il piano attivo e i limiti reali.
+  3) Statistiche extra (opzionale) - SofaScore via RapidAPI, corner/cartellini
+     Iscriviti al prodotto "SofaScore" (o equivalente) su RapidAPI:
+       export SOFASCORE_API_KEY="la-tua-chiave"
+     Prima di usarla, esplora la struttura reale (API non ufficiale):
+       python3 edge_scan.py --ss-search "Napoli"
+       python3 edge_scan.py --ss-scheduled 2026-08-30
 """
 
 
@@ -172,9 +167,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     o.add_argument("--football-data-key", default=None)
     o.add_argument("--odds-key", default=None, help="chiave The Odds API")
     o.add_argument("--sharpapi-key", default=None, help="chiave SharpAPI")
-    o.add_argument("--api-football-key", default=None,
-                   help="chiave API-Football (opzionale: statistiche extra come "
-                        "corner e cartellini, non coperte da football-data.org)")
+    o.add_argument("--sofascore-key", default=None,
+                   help="chiave SofaScore via RapidAPI (opzionale: statistiche "
+                        "extra come corner e cartellini, non coperte da "
+                        "football-data.org)")
     o.add_argument("--env-file", default=None,
                    help="file KEY=VALUE con le chiavi. Se omesso viene cercato "
                         "un .env nella cartella corrente e in quella dello script")
@@ -228,45 +224,37 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                     help="stampa la risposta grezza delle quote e la sua struttura, "
                          "per verificare la mappatura dei campi")
 
-    af = p.add_argument_group(
-        "API-Football (statistiche extra opzionali - corner, cartellini; "
-        "verificare la struttura reale con questi comandi prima di usarle)")
-    af.add_argument("--af-status", action="store_true",
-                    help="stampa /status (info account/piano) ed esce")
-    af.add_argument("--af-leagues", metavar="NOME", nargs="?", const="",
-                    help="cerca campionati per nome (vuoto = elenco completo) ed esce")
-    af.add_argument("--af-search-team", metavar="NOME", default=None,
-                    help="cerca squadre per nome (per trovarne il team_id) ed esce")
-    af.add_argument("--af-team-stats", action="store_true",
-                    help="statistiche stagionali aggregate di una squadra "
-                         "(richiede --af-team, --af-league, --af-season) ed esce")
-    af.add_argument("--af-fixtures", action="store_true",
-                    help="ultime partite di una squadra (richiede --af-team, "
-                         "--af-league, --af-season; usa --af-last) ed esce")
-    af.add_argument("--af-fixture-stats", metavar="FIXTURE_ID", type=int, default=None,
+    ss = p.add_argument_group(
+        "SofaScore via RapidAPI (statistiche extra opzionali - corner, "
+        "cartellini; API non ufficiale, verificare la struttura reale con "
+        "questi comandi prima di usarla)")
+    ss.add_argument("--ss-search", metavar="NOME", default=None,
+                    help="cerca squadre/tornei/eventi per nome (per trovarne "
+                         "l'id) ed esce")
+    ss.add_argument("--ss-scheduled", metavar="YYYY-MM-DD", default=None,
+                    help="partite di calcio programmate in una data ed esce")
+    ss.add_argument("--ss-team-events", metavar="TEAM_ID", type=int, default=None,
+                    help="partite recenti/prossime di una squadra (usa "
+                         "--ss-direction e --ss-page) ed esce")
+    ss.add_argument("--ss-direction", default="last", choices=["last", "next"],
+                    help="con --ss-team-events, partite passate o future")
+    ss.add_argument("--ss-page", type=int, default=0,
+                    help="con --ss-team-events, pagina dei risultati (0 = piu' recenti)")
+    ss.add_argument("--ss-event", metavar="EVENT_ID", type=int, default=None,
+                    help="dettagli grezzi di un evento (squadre, orario, "
+                         "punteggio) dato il suo id, ed esce")
+    ss.add_argument("--ss-event-stats", metavar="EVENT_ID", type=int, default=None,
                     help="statistiche dettagliate (corner, cartellini, tiri) di "
-                         "una partita gia' giocata, dato il suo id, ed esce")
-    af.add_argument("--af-probe", metavar="PATH", default=None,
-                    help="chiama un endpoint qualsiasi (es. /timezone) e ne stampa "
-                         "la struttura grezza, per esplorare l'API; usa --af-params")
-    af.add_argument("--af-params", metavar="k=v,k=v", default=None,
-                    help="parametri query per --af-probe, separati da virgola")
-    af.add_argument("--af-team", type=int, default=None, help="team_id di API-Football")
-    af.add_argument("--af-league", type=int, default=None, help="league_id di API-Football")
-    af.add_argument("--af-season", type=int, default=None,
-                    help="anno di inizio stagione (es. 2025 per 2025/26)")
-    af.add_argument("--af-last", type=int, default=10,
-                    help="con --af-fixtures, quante partite recenti richiedere")
-    af.add_argument("--af-base", default=None,
-                    help=f"URL base di API-Football (default diretto: {AF_DEFAULT_BASE}; "
-                         "con --af-via-rapidapi cambia automaticamente)")
-    af.add_argument("--af-via-rapidapi", action="store_true",
-                    help="la chiave viene da RapidAPI, non da api-football.com "
-                         "diretto: cambia host e header di autenticazione "
-                         "(verifica base/host esatti nella scheda 'Code Snippets' "
-                         "del tuo abbonamento RapidAPI se questi default non funzionano)")
-    af.add_argument("--af-rapidapi-host", default=None,
-                    help=f"header x-rapidapi-host da inviare (default: {AF_RAPIDAPI_HOST})")
+                         "una partita, dato il suo id, ed esce")
+    ss.add_argument("--ss-probe", metavar="PATH", default=None,
+                    help="chiama un path qualsiasi (es. /api/v1/team/2697) e ne "
+                         "stampa la struttura grezza, per esplorare l'API; usa "
+                         "--ss-params per eventuali parametri query")
+    ss.add_argument("--ss-params", metavar="k=v,k=v", default=None,
+                    help="parametri query per --ss-probe, separati da virgola")
+    ss.add_argument("--ss-host", default=SS_DEFAULT_HOST,
+                    help="header x-rapidapi-host da inviare (cambialo solo se "
+                         "il tuo abbonamento RapidAPI usa un host diverso)")
     return p.parse_args(argv)
 
 
@@ -292,7 +280,7 @@ KEY_VARIABLES = [
     ("FOOTBALL_DATA_API_KEY", "dati storici (football-data.org)", True),
     ("SHARPAPI_KEY", "quote (SharpAPI)", False),
     ("ODDS_API_KEY", "quote (The Odds API)", False),
-    ("API_FOOTBALL_KEY", "statistiche extra: corner, cartellini (API-Football)", False),
+    ("SOFASCORE_API_KEY", "statistiche extra: corner, cartellini (SofaScore/RapidAPI)", False),
 ]
 
 
@@ -348,7 +336,7 @@ def cmd_check_keys(args: argparse.Namespace, env_file: Optional[str],
         "FOOTBALL_DATA_API_KEY": args.football_data_key,
         "SHARPAPI_KEY": args.sharpapi_key,
         "ODDS_API_KEY": args.odds_key,
-        "API_FOOTBALL_KEY": args.api_football_key,
+        "SOFASCORE_API_KEY": args.sofascore_key,
     }
     problems: List[str] = []
     for name, description, required in KEY_VARIABLES:
@@ -772,7 +760,7 @@ def cmd_dump_odds(args: argparse.Namespace, provider: str, key: str, http: HttpC
     return 0
 
 
-def _print_af_payload(url: str, payload: Any) -> None:
+def _print_ss_payload(url: str, payload: Any) -> None:
     print(f"URL                  : {redact(url)}\n")
     print("--- struttura riconosciuta ---")
     print(summarize_structure(payload))
@@ -780,117 +768,82 @@ def _print_af_payload(url: str, payload: Any) -> None:
     print(json.dumps(payload, indent=2, ensure_ascii=False, default=str)[:4000])
 
 
-def af_client_from_args(args: argparse.Namespace, http: HttpClient) -> Optional[ApiFootballClient]:
-    key = args.api_football_key or os.environ.get("API_FOOTBALL_KEY", "")
+def ss_client_from_args(args: argparse.Namespace, http: HttpClient) -> Optional[SofaScoreClient]:
+    key = args.sofascore_key or os.environ.get("SOFASCORE_API_KEY", "")
     if not key:
-        print("Manca API_FOOTBALL_KEY. Vedi --check-keys o l'aiuto (-h) per come "
+        print("Manca SOFASCORE_API_KEY. Vedi --check-keys o l'aiuto (-h) per come "
               "impostarla.", file=sys.stderr)
         return None
-    via_rapidapi = args.af_via_rapidapi or bool(
-        args.af_rapidapi_host or os.environ.get("API_FOOTBALL_RAPIDAPI_HOST")
-    )
-    rapidapi_host = (
-        args.af_rapidapi_host or os.environ.get("API_FOOTBALL_RAPIDAPI_HOST") or AF_RAPIDAPI_HOST
-        if via_rapidapi else None
-    )
-    base = args.af_base or (AF_RAPIDAPI_BASE if via_rapidapi else AF_DEFAULT_BASE)
-    return ApiFootballClient(key, http, base=base, rapidapi_host=rapidapi_host)
+    return SofaScoreClient(key, http, host=args.ss_host)
 
 
-def cmd_af_status(args: argparse.Namespace, http: HttpClient) -> int:
-    client = af_client_from_args(args, http)
+def cmd_ss_search(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
     if client is None:
         return 2
-    payload = client.status()
-    print("--- struttura riconosciuta ---")
-    print(summarize_structure(payload))
-    print("\n--- JSON grezzo ---")
-    print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
-    if isinstance(payload, dict) and (client.requests_remaining or client.requests_used):
-        print(f"\nHeader rate-limit    : remaining={client.requests_remaining} "
-              f"limit={client.requests_used}")
+    url = build_url(f"{client.base}/api/v1/search/{args.ss_search}", {})
+    payload = client.search(args.ss_search)
+    _print_ss_payload(url, payload)
     return 0
 
 
-def cmd_af_leagues(args: argparse.Namespace, http: HttpClient) -> int:
-    client = af_client_from_args(args, http)
+def cmd_ss_scheduled(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
     if client is None:
         return 2
-    name = args.af_leagues or None
-    url = build_url(f"{client.base}/leagues", {"search": name} if name else {})
-    payload = client.leagues(name=name)
-    _print_af_payload(url, payload)
+    path = f"/api/v1/sport/football/scheduled-events/{args.ss_scheduled}"
+    url = build_url(f"{client.base}{path}", {})
+    payload = client.scheduled_events(args.ss_scheduled)
+    _print_ss_payload(url, payload)
     return 0
 
 
-def cmd_af_search_team(args: argparse.Namespace, http: HttpClient) -> int:
-    client = af_client_from_args(args, http)
+def cmd_ss_team_events(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
     if client is None:
         return 2
-    url = build_url(f"{client.base}/teams", {"search": args.af_search_team})
-    payload = client.search_teams(args.af_search_team)
-    _print_af_payload(url, payload)
+    path = f"/api/v1/team/{args.ss_team_events}/events/{args.ss_direction}/{args.ss_page}"
+    url = build_url(f"{client.base}{path}", {})
+    payload = client.team_events(args.ss_team_events, page=args.ss_page,
+                                 direction=args.ss_direction)
+    _print_ss_payload(url, payload)
     return 0
 
 
-def cmd_af_team_stats(args: argparse.Namespace, http: HttpClient) -> int:
-    client = af_client_from_args(args, http)
+def cmd_ss_event(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
     if client is None:
         return 2
-    if args.af_team is None or args.af_league is None or args.af_season is None:
-        print("--af-team-stats richiede --af-team, --af-league e --af-season "
-              "(usa --af-search-team e --af-leagues per trovarli).", file=sys.stderr)
-        return 2
-    url = build_url(f"{client.base}/teams/statistics", {
-        "team": args.af_team, "league": args.af_league, "season": args.af_season,
-    })
-    payload = client.team_statistics(args.af_team, args.af_league, args.af_season)
-    _print_af_payload(url, payload)
+    url = build_url(f"{client.base}/api/v1/event/{args.ss_event}", {})
+    payload = client.event_details(args.ss_event)
+    _print_ss_payload(url, payload)
     return 0
 
 
-def cmd_af_fixtures(args: argparse.Namespace, http: HttpClient) -> int:
-    client = af_client_from_args(args, http)
+def cmd_ss_event_stats(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
     if client is None:
         return 2
-    if args.af_team is None or args.af_league is None or args.af_season is None:
-        print("--af-fixtures richiede --af-team, --af-league e --af-season.",
-              file=sys.stderr)
-        return 2
-    url = build_url(f"{client.base}/fixtures", {
-        "team": args.af_team, "league": args.af_league, "season": args.af_season,
-        "last": args.af_last,
-    })
-    payload = client.fixtures_by_team(args.af_team, args.af_league, args.af_season,
-                                      last=args.af_last)
-    _print_af_payload(url, payload)
+    url = build_url(f"{client.base}/api/v1/event/{args.ss_event_stats}/statistics", {})
+    payload = client.event_statistics(args.ss_event_stats)
+    _print_ss_payload(url, payload)
     return 0
 
 
-def cmd_af_fixture_stats(args: argparse.Namespace, http: HttpClient) -> int:
-    client = af_client_from_args(args, http)
-    if client is None:
-        return 2
-    url = build_url(f"{client.base}/fixtures/statistics", {"fixture": args.af_fixture_stats})
-    payload = client.fixture_statistics(args.af_fixture_stats)
-    _print_af_payload(url, payload)
-    return 0
-
-
-def cmd_af_probe(args: argparse.Namespace, http: HttpClient) -> int:
-    client = af_client_from_args(args, http)
+def cmd_ss_probe(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
     if client is None:
         return 2
     params: Dict[str, Any] = {}
-    if args.af_params:
-        for pair in args.af_params.split(","):
+    if args.ss_params:
+        for pair in args.ss_params.split(","):
             if "=" in pair:
                 k, v = pair.split("=", 1)
                 params[k.strip()] = v.strip()
-    path = args.af_probe if args.af_probe.startswith("/") else f"/{args.af_probe}"
+    path = args.ss_probe if args.ss_probe.startswith("/") else f"/{args.ss_probe}"
     url = build_url(f"{client.base}{path}", params)
     payload = client.probe_raw(path, params)
-    _print_af_payload(url, payload)
+    _print_ss_payload(url, payload)
     return 0
 
 
@@ -899,29 +852,27 @@ def run(args: argparse.Namespace) -> int:
     if args.check_keys:
         return cmd_check_keys(args, env_file, from_file)
 
-    # i comandi diagnostici di API-Football non toccano football-data.org ne'
+    # i comandi diagnostici di SofaScore non toccano football-data.org ne'
     # i provider di quote: bypassano del tutto i controlli sulle altre chiavi.
-    af_diagnostic = (
-        args.af_status or args.af_leagues is not None or args.af_search_team
-        or args.af_team_stats or args.af_fixtures or args.af_fixture_stats is not None
-        or args.af_probe
+    ss_diagnostic = (
+        args.ss_search or args.ss_scheduled or args.ss_team_events is not None
+        or args.ss_event is not None or args.ss_event_stats is not None
+        or args.ss_probe
     )
-    if af_diagnostic:
-        af_http = HttpClient(cache_dir=args.cache_dir, offline=args.offline,
+    if ss_diagnostic:
+        ss_http = HttpClient(cache_dir=args.cache_dir, offline=args.offline,
                              verbose=args.verbose)
-        if args.af_status:
-            return cmd_af_status(args, af_http)
-        if args.af_leagues is not None:
-            return cmd_af_leagues(args, af_http)
-        if args.af_search_team:
-            return cmd_af_search_team(args, af_http)
-        if args.af_team_stats:
-            return cmd_af_team_stats(args, af_http)
-        if args.af_fixtures:
-            return cmd_af_fixtures(args, af_http)
-        if args.af_fixture_stats is not None:
-            return cmd_af_fixture_stats(args, af_http)
-        return cmd_af_probe(args, af_http)
+        if args.ss_search:
+            return cmd_ss_search(args, ss_http)
+        if args.ss_scheduled:
+            return cmd_ss_scheduled(args, ss_http)
+        if args.ss_team_events is not None:
+            return cmd_ss_team_events(args, ss_http)
+        if args.ss_event is not None:
+            return cmd_ss_event(args, ss_http)
+        if args.ss_event_stats is not None:
+            return cmd_ss_event_stats(args, ss_http)
+        return cmd_ss_probe(args, ss_http)
 
     fd_key = args.football_data_key or os.environ.get("FOOTBALL_DATA_API_KEY", "")
     provider, odds_key = resolve_provider(args)
