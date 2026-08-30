@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from .analysis import EdgeRow, RELIABILITY_OK, RELIABILITY_NONE, analyze_fixture
 from .api_football import ApiFootballClient
 from .api_football import DEFAULT_BASE as AF_DEFAULT_BASE
+from .api_football import DEFAULT_RAPIDAPI_BASE as AF_RAPIDAPI_BASE
+from .api_football import DEFAULT_RAPIDAPI_HOST as AF_RAPIDAPI_HOST
 from .calibration import assess as assess_calibration
 from .calibration import render as render_calibration
 from .config import COMPETITIONS, DEFAULT_COMPETITIONS, Settings
@@ -77,9 +79,13 @@ Senza chiave quote si puo' comunque usare --model-only (probabilita' del
 modello, nessun edge: senza quote reali l'edge non e' calcolabile).
 
   3) Statistiche extra (opzionale) - API-Football, corner/cartellini
-     Piano gratuito su https://www.api-football.com/ (o via RapidAPI)
-     export API_FOOTBALL_KEY="la-tua-chiave"
-     Prima di usarla: python3 edge_scan.py --af-status
+     Piano gratuito su https://www.api-football.com/ (accesso diretto)
+     oppure via RapidAPI (stesso servizio, chiave diversa):
+       export API_FOOTBALL_KEY="la-tua-chiave"
+     Se la chiave viene da RapidAPI aggiungi anche --af-via-rapidapi
+     (o export API_FOOTBALL_RAPIDAPI_HOST=... se il tuo host differisce
+     da quello di default).
+     Prima di usarla: python3 edge_scan.py --af-status [--af-via-rapidapi]
      per vedere il piano attivo e i limiti reali.
 """
 
@@ -251,7 +257,16 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                     help="anno di inizio stagione (es. 2025 per 2025/26)")
     af.add_argument("--af-last", type=int, default=10,
                     help="con --af-fixtures, quante partite recenti richiedere")
-    af.add_argument("--af-base", default=AF_DEFAULT_BASE, help="URL base di API-Football")
+    af.add_argument("--af-base", default=None,
+                    help=f"URL base di API-Football (default diretto: {AF_DEFAULT_BASE}; "
+                         "con --af-via-rapidapi cambia automaticamente)")
+    af.add_argument("--af-via-rapidapi", action="store_true",
+                    help="la chiave viene da RapidAPI, non da api-football.com "
+                         "diretto: cambia host e header di autenticazione "
+                         "(verifica base/host esatti nella scheda 'Code Snippets' "
+                         "del tuo abbonamento RapidAPI se questi default non funzionano)")
+    af.add_argument("--af-rapidapi-host", default=None,
+                    help=f"header x-rapidapi-host da inviare (default: {AF_RAPIDAPI_HOST})")
     return p.parse_args(argv)
 
 
@@ -771,7 +786,15 @@ def af_client_from_args(args: argparse.Namespace, http: HttpClient) -> Optional[
         print("Manca API_FOOTBALL_KEY. Vedi --check-keys o l'aiuto (-h) per come "
               "impostarla.", file=sys.stderr)
         return None
-    return ApiFootballClient(key, http, base=args.af_base)
+    via_rapidapi = args.af_via_rapidapi or bool(
+        args.af_rapidapi_host or os.environ.get("API_FOOTBALL_RAPIDAPI_HOST")
+    )
+    rapidapi_host = (
+        args.af_rapidapi_host or os.environ.get("API_FOOTBALL_RAPIDAPI_HOST") or AF_RAPIDAPI_HOST
+        if via_rapidapi else None
+    )
+    base = args.af_base or (AF_RAPIDAPI_BASE if via_rapidapi else AF_DEFAULT_BASE)
+    return ApiFootballClient(key, http, base=base, rapidapi_host=rapidapi_host)
 
 
 def cmd_af_status(args: argparse.Namespace, http: HttpClient) -> int:

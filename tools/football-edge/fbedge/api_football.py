@@ -26,7 +26,15 @@ from typing import Any, Dict, Optional, Tuple
 
 from .httpcache import HttpClient, HttpError, build_url
 
+#: accesso diretto (api-football.com / api-sports.io)
 DEFAULT_BASE = "https://v3.football.api-sports.io"
+
+#: accesso via RapidAPI: stesso servizio, host e header di autenticazione
+#: diversi. Il path esatto (con o senza /v3) va confermato guardando la
+#: scheda "Code Snippets" del proprio abbonamento su RapidAPI: e' la fonte
+#: piu' affidabile, cambia con l'API e col piano - non fidarsi a memoria.
+DEFAULT_RAPIDAPI_HOST = "api-football-v1.p.rapidapi.com"
+DEFAULT_RAPIDAPI_BASE = "https://api-football-v1.p.rapidapi.com/v3"
 
 #: cache lunga per dati che cambiano raramente o mai (id squadre, campionati)
 TTL_STATIC = 86400 * 30
@@ -41,16 +49,24 @@ class ApiFootballClient:
     usage_label = "richieste giornaliere"
     usage_is_budget = True
 
-    def __init__(self, api_key: str, http: HttpClient, base: str = DEFAULT_BASE):
+    def __init__(
+        self, api_key: str, http: HttpClient, base: str = DEFAULT_BASE,
+        rapidapi_host: Optional[str] = None,
+    ):
         if not api_key:
             raise ValueError("API_FOOTBALL_KEY mancante")
         self.api_key = api_key
         self.http = http
         self.base = base.rstrip("/")
+        #: se impostato, autentica come RapidAPI (due header) invece che come
+        #: accesso diretto (un header)
+        self.rapidapi_host = rapidapi_host
         self.requests_remaining: Optional[str] = None
         self.requests_used: Optional[str] = None
 
     def _headers(self) -> Dict[str, str]:
+        if self.rapidapi_host:
+            return {"x-rapidapi-key": self.api_key, "x-rapidapi-host": self.rapidapi_host}
         return {"x-apisports-key": self.api_key}
 
     def _get(self, path: str, params: Dict[str, Any], ttl: int) -> Tuple[str, Any]:
