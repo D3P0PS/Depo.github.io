@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Sequence
 from .analysis import EdgeRow, RELIABILITY_LOW, RELIABILITY_NONE, RELIABILITY_OK
 from .calibration import Calibration
 from .config import Settings
+from .news import get_news_alerts
 from .report import LIMITS
 
 _RELIABILITY_CLASS = {
@@ -184,7 +185,10 @@ header .meta { color: var(--muted); font-size: 0.92rem; }
 .banner { border-radius: 12px; padding: 18px 20px; margin: 20px 0; }
 .banner-bad { background: var(--bad-bg); border: 1px solid var(--bad-line); color: var(--bad-ink); }
 .banner-ok { background: var(--ok-bg); border: 1px solid var(--ok-line); }
+.banner-warn { background: var(--warn-bg); border: 1px solid #e8d180; color: var(--warn-ink); }
 .banner h2 { margin: 0 0 10px; font-size: 1.05rem; }
+.banner a { color: inherit; text-decoration: underline; }
+.banner a:hover { opacity: 0.8; }
 .cal-stats { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; }
 .cal-stats div { font-size: 0.85rem; color: inherit; opacity: 0.85; }
 .cal-stats span { display: block; font-size: 1.15rem; font-weight: 600; opacity: 1; }
@@ -282,6 +286,7 @@ def render_html(
   </header>
 
   {notes_block}
+  {get_news_alerts(list(rows))}
   {_calibration_html(calibration)}
   {_table_html(rows, "Mercati con quota, per edge decrescente")}
   {_table_html(unpriced, "Mercati senza quota abbinata (solo probabilità di modello)")}
