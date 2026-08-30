@@ -90,6 +90,12 @@ class SofaScoreClient:
         _url, payload = self._get(f"/api/v1/sport/football/scheduled-events/{date}", {}, ttl)
         return payload
 
+    def live_events(self, ttl: int = 60) -> Any:
+        """Partite di calcio in corso in questo momento:
+        /api/v1/sport/football/events/live"""
+        _url, payload = self._get("/api/v1/sport/football/events/live", {}, ttl)
+        return payload
+
     def team_events(
         self, team_id: int, page: int = 0, direction: str = "last", ttl: int = TTL_SCHEDULE,
     ) -> Any:

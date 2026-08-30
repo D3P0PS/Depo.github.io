@@ -233,6 +233,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                          "l'id) ed esce")
     ss.add_argument("--ss-scheduled", metavar="YYYY-MM-DD", default=None,
                     help="partite di calcio programmate in una data ed esce")
+    ss.add_argument("--ss-live", action="store_true",
+                    help="partite di calcio in corso in questo momento ed esce")
     ss.add_argument("--ss-team-events", metavar="TEAM_ID", type=int, default=None,
                     help="partite recenti/prossime di una squadra (usa "
                          "--ss-direction e --ss-page) ed esce")
@@ -787,6 +789,16 @@ def cmd_ss_search(args: argparse.Namespace, http: HttpClient) -> int:
     return 0
 
 
+def cmd_ss_live(args: argparse.Namespace, http: HttpClient) -> int:
+    client = ss_client_from_args(args, http)
+    if client is None:
+        return 2
+    url = build_url(f"{client.base}/api/v1/sport/football/events/live", {})
+    payload = client.live_events()
+    _print_ss_payload(url, payload)
+    return 0
+
+
 def cmd_ss_scheduled(args: argparse.Namespace, http: HttpClient) -> int:
     client = ss_client_from_args(args, http)
     if client is None:
@@ -855,7 +867,8 @@ def run(args: argparse.Namespace) -> int:
     # i comandi diagnostici di SofaScore non toccano football-data.org ne'
     # i provider di quote: bypassano del tutto i controlli sulle altre chiavi.
     ss_diagnostic = (
-        args.ss_search or args.ss_scheduled or args.ss_team_events is not None
+        args.ss_search or args.ss_scheduled or args.ss_live
+        or args.ss_team_events is not None
         or args.ss_event is not None or args.ss_event_stats is not None
         or args.ss_probe
     )
@@ -866,6 +879,8 @@ def run(args: argparse.Namespace) -> int:
             return cmd_ss_search(args, ss_http)
         if args.ss_scheduled:
             return cmd_ss_scheduled(args, ss_http)
+        if args.ss_live:
+            return cmd_ss_live(args, ss_http)
         if args.ss_team_events is not None:
             return cmd_ss_team_events(args, ss_http)
         if args.ss_event is not None:
