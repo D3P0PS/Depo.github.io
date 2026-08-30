@@ -235,6 +235,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     ss.add_argument("--ss-categories", metavar="YYYY-MM-DD", default=None,
                     help="campionati/nazioni con almeno una partita in una "
                          "data (primo passo per trovare le partite di oggi) ed esce")
+    ss.add_argument("--ss-filter", metavar="NOME", default=None,
+                    help="con --ss-categories, mostra solo le nazioni il cui "
+                         "nome contiene questa stringa (es. 'Italy'), invece "
+                         "del JSON grezzo troncato")
     ss.add_argument("--ss-category-events", metavar="CATEGORY_ID", type=int, default=None,
                     help="partite di un campionato in una data (usa --ss-date; "
                          "il CATEGORY_ID viene da --ss-categories) ed esce")
@@ -832,6 +836,23 @@ def cmd_ss_categories(args: argparse.Namespace, http: HttpClient) -> int:
     path = f"/api/v1/sport/football/{args.ss_categories}/0/categories"
     url = build_url(f"{client.base}{path}", {})
     payload = client.categories_with_events("football", args.ss_categories)
+
+    if args.ss_filter:
+        needle = args.ss_filter.strip().lower()
+        items = payload.get("categories", []) if isinstance(payload, dict) else []
+        matches = [
+            item for item in items
+            if needle in item.get("category", {}).get("name", "").lower()
+        ]
+        print(f"URL                  : {redact(url)}\n")
+        print(f"{len(matches)}/{len(items)} categorie contengono '{args.ss_filter}':\n")
+        for item in matches:
+            cat = item.get("category", {})
+            print(f"  id={cat.get('id')!s:<6} {cat.get('name')} "
+                  f"(eventi oggi: {item.get('totalEvents')}, "
+                  f"tornei: {item.get('uniqueTournamentIds')})")
+        return 0
+
     _print_ss_payload(url, payload)
     return 0
 
