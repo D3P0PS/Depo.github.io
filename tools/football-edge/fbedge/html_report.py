@@ -61,7 +61,7 @@ def _slip_button(row: EdgeRow) -> str:
     )
 
 
-def _market_row_html(row: EdgeRow, allow_slip: bool) -> str:
+def _market_row_html(row: EdgeRow, allow_slip: bool, group: str) -> str:
     ci = (
         f"{row.edge_lo:+.1f}% ; {row.edge_hi:+.1f}%"
         if row.edge_lo is not None and row.edge_hi is not None
@@ -77,7 +77,7 @@ def _market_row_html(row: EdgeRow, allow_slip: bool) -> str:
     )
     slip_cell = f'<td data-label="Schedina" class="slip-cell">{_slip_button(row)}</td>' if allow_slip else ""
     return f"""
-      <tr class="{_edge_class(row.edge_pct)}">
+      <tr class="{_edge_class(row.edge_pct)} market-row" data-group="{group}" hidden>
         <td data-label="Mercato">{_esc(row.market)}</td>
         <td data-label="Selezione">{_esc(row.selection)}</td>
         <td data-label="Quota" class="num">{odds}</td>
@@ -99,29 +99,48 @@ def _table_html(rows: Sequence[EdgeRow], caption: str, allow_slip: bool = False)
         groups[(row.kickoff, row.competition, row.match_label)].append(row)
 
     n_cols = 9 if allow_slip else 8
+    table_id = "priced" if allow_slip else "unpriced"
     body_lines = []
-    for (kickoff, competition, match_label), market_rows in sorted(groups.items()):
+    for i, ((kickoff, competition, match_label), market_rows) in enumerate(sorted(groups.items())):
         sorted_markets = sorted(
             market_rows,
             key=lambda r: (0, -r.edge_pct) if r.edge_pct is not None else (1, 0.0),
         )
         kickoff_str = kickoff.strftime("%H:%M UTC") if kickoff else ""
+        gid = f"{table_id}-{i}"
+
+        best = sorted_markets[0]
+        if allow_slip and best.edge_pct is not None:
+            summary = f"{len(sorted_markets)} mercati &middot; top edge {best.edge_pct:+.1f}%"
+        else:
+            summary = f"{len(sorted_markets)} mercati"
+
         body_lines.append(f"""
-      <tr class="match-header">
-        <td colspan="{n_cols}" class="match-name">{_esc(match_label)}
-          <span class="comp-badge">{_esc(competition)}</span>
-          <span class="kickoff-badge">{_esc(kickoff_str)}</span>
+      <tr class="match-header" data-group="{gid}" role="button" tabindex="0" aria-expanded="false">
+        <td colspan="{n_cols}" class="match-name">
+          <span class="match-title">{_esc(match_label)}
+            <span class="comp-badge">{_esc(competition)}</span>
+            <span class="kickoff-badge">{_esc(kickoff_str)}</span>
+          </span>
+          <span class="match-right">
+            <span class="match-summary">{summary}</span>
+            <span class="match-toggle-icon">▾</span>
+          </span>
         </td>
       </tr>""")
         for row in sorted_markets:
-            body_lines.append(_market_row_html(row, allow_slip))
+            body_lines.append(_market_row_html(row, allow_slip, group=gid))
 
     body = "\n".join(body_lines)
     slip_header = "<th>Schedina</th>" if allow_slip else ""
     return f"""
     <h2>{_esc(caption)}</h2>
+    <div class="table-toolbar">
+      <button type="button" class="toolbar-btn" data-expand-all="{table_id}">Espandi tutte</button>
+      <button type="button" class="toolbar-btn" data-collapse-all="{table_id}">Comprimi tutte</button>
+    </div>
     <div class="table-wrap">
-    <table class="{'with-slip' if allow_slip else ''}">
+    <table class="{'with-slip' if allow_slip else ''}" data-table-id="{table_id}">
       <thead><tr>
         <th>Mercato</th><th>Selezione</th><th>Quota</th>
         <th>P. modello</th><th>P. mercato</th><th>Edge</th>
@@ -238,6 +257,15 @@ header .summary-line { color: var(--muted); font-size: 0.86rem; margin: 6px 0 0;
 .hint { margin: 10px 0 0; font-size: 0.86rem; }
 .hint code { background: rgba(127,127,127,0.18); padding: 1px 5px; border-radius: 4px; }
 h2 { font-size: 1.05rem; margin: 26px 0 10px; }
+[hidden] { display: none !important; }
+.table-toolbar {
+  display: flex; justify-content: flex-end; gap: 8px; padding: 8px 4px; margin-bottom: 6px;
+}
+.toolbar-btn {
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  padding: 6px 12px; border-radius: 8px; font-size: 0.76rem; cursor: pointer; font-family: inherit;
+}
+.toolbar-btn:hover { background: var(--head-bg); }
 .table-wrap {
   overflow-x: auto; border-radius: 14px; border: 1px solid var(--line);
   background: var(--panel); box-shadow: var(--shadow);
@@ -255,9 +283,20 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: now
 td.ci { color: var(--muted); font-size: 0.8rem; min-width: 150px; }
 .note { color: var(--muted); font-size: 0.76rem; margin-top: 2px; }
 .edge-cell { font-weight: 700; }
-tr.match-header { background: var(--head-bg); }
+tr.match-header { background: var(--head-bg); cursor: pointer; }
+tr.match-header:hover { background: rgba(127,127,127,0.14); }
 tr.match-header td { padding: 12px; font-weight: 700; color: var(--ink); }
-.match-name { font-size: 0.95rem; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.match-name {
+  font-size: 0.95rem; display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px 14px;
+}
+.match-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.match-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.match-summary { color: var(--muted); font-size: 0.78rem; font-weight: 500; white-space: nowrap; }
+.match-toggle-icon {
+  color: var(--muted); font-size: 0.85rem; transition: transform 0.2s ease; display: inline-block;
+}
+tr.match-header[aria-expanded="true"] .match-toggle-icon { transform: rotate(180deg); }
 .comp-badge {
   display: inline-block; padding: 2px 9px; background: var(--accent); color: var(--accent-ink);
   border-radius: 999px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
@@ -534,6 +573,48 @@ JS = """
   });
 
   render();
+
+  // --- accordion: match compressi di default, un click li espande ---
+  function setGroupOpen(header, open){
+    var gid = header.dataset.group;
+    header.setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.querySelectorAll('tr.market-row[data-group="' + CSS.escape(gid) + '"]').forEach(function(row){
+      row.hidden = !open;
+    });
+  }
+  function toggleGroup(header){
+    setGroupOpen(header, header.getAttribute('aria-expanded') !== 'true');
+  }
+
+  document.addEventListener('click', function(e){
+    if (e.target.closest('.slip-add') || e.target.closest('.slip-remove')) return;
+
+    var header = e.target.closest('tr.match-header');
+    if (header) { toggleGroup(header); return; }
+
+    var expandBtn = e.target.closest('[data-expand-all]');
+    if (expandBtn) {
+      var tid = expandBtn.dataset.expandAll;
+      document.querySelectorAll('table[data-table-id="' + CSS.escape(tid) + '"] tr.match-header')
+        .forEach(function(h){ setGroupOpen(h, true); });
+      return;
+    }
+    var collapseBtn = e.target.closest('[data-collapse-all]');
+    if (collapseBtn) {
+      var tid2 = collapseBtn.dataset.collapseAll;
+      document.querySelectorAll('table[data-table-id="' + CSS.escape(tid2) + '"] tr.match-header')
+        .forEach(function(h){ setGroupOpen(h, false); });
+      return;
+    }
+  });
+
+  document.addEventListener('keydown', function(e){
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var header = e.target.closest('tr.match-header');
+    if (!header) return;
+    e.preventDefault();
+    toggleGroup(header);
+  });
 })();
 """
 
