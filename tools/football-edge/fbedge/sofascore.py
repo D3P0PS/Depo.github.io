@@ -57,14 +57,17 @@ class SofaScoreClient:
             resp = self.http.get(url, headers=self._headers(), ttl=ttl)
         except HttpError as exc:
             if exc.status in (401, 403):
+                # il body di RapidAPI di solito dice la causa esatta (chiave
+                # non valida, o valida ma non iscritta a QUESTA api): non
+                # sostituirlo con un messaggio generico, va mostrato per intero
                 raise HttpError(
                     exc.status, url,
-                    "chiave RapidAPI non valida per questa API, oppure non sei "
-                    "iscritto/a al prodotto giusto su RapidAPI (verifica host e "
-                    "abbonamento nella dashboard)",
+                    f"{exc.body}\n(probabile causa: chiave RapidAPI valida ma "
+                    "non iscritta al prodotto SofaScore/sportapi7, o host "
+                    "sbagliato - verifica nella dashboard RapidAPI)",
                 ) from exc
             if exc.status == 429:
-                raise HttpError(429, url, "budget RapidAPI esaurito per questo periodo") from exc
+                raise HttpError(429, url, f"{exc.body}\n(budget RapidAPI esaurito?)") from exc
             raise
         self.requests_remaining = resp.headers.get(
             "x-ratelimit-requests-remaining", self.requests_remaining
