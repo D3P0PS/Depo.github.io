@@ -867,6 +867,33 @@ def cmd_ss_category_events(args: argparse.Namespace, http: HttpClient) -> int:
     path = f"/api/v1/category/{args.ss_category_events}/scheduled-events/{args.ss_date}"
     url = build_url(f"{client.base}{path}", {})
     payload = client.category_scheduled_events(args.ss_category_events, args.ss_date)
+
+    if args.ss_filter:
+        # una "categoria" (nazione) mescola tutte le competizioni: Serie A,
+        # Serie B, Coppa Italia, ... va filtrata per nome torneo, non per
+        # nome nazione (gia' scelto scegliendo il category_id)
+        needle = args.ss_filter.strip().lower()
+        items = payload.get("events", []) if isinstance(payload, dict) else []
+        matches = [
+            ev for ev in items
+            if needle in ev.get("tournament", {}).get("name", "").lower()
+        ]
+        print(f"URL                  : {redact(url)}\n")
+        print(f"{len(matches)}/{len(items)} eventi con torneo che contiene '{args.ss_filter}':\n")
+        for ev in matches:
+            tour = ev.get("tournament", {})
+            unique = tour.get("uniqueTournament", {})
+            home = ev.get("homeTeam", {})
+            away = ev.get("awayTeam", {})
+            status = ev.get("status", {}).get("type", "?")
+            score = f"{ev.get('homeScore', {}).get('current', '-')}-{ev.get('awayScore', {}).get('current', '-')}"
+            print(f"  event_id={ev.get('id')}  {home.get('name')} vs {away.get('name')}  "
+                  f"[{status}] {score}")
+            print(f"    torneo='{tour.get('name')}' uniqueTournamentId={unique.get('id')} "
+                  f"seasonId={ev.get('season', {}).get('id')}  "
+                  f"homeTeamId={home.get('id')} awayTeamId={away.get('id')}")
+        return 0
+
     _print_ss_payload(url, payload)
     return 0
 
