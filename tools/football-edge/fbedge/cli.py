@@ -861,13 +861,16 @@ def run(args: argparse.Namespace) -> int:
     calibration = assess_calibration(priced)
     threshold = settings.min_edge_pct
     kept = priced if threshold is None else [r for r in priced if r.edge_pct >= threshold]
+    hidden = len(priced) - len(kept)
 
-    # Filtra le righe INSUFF. se richiesto
+    # Filtra le righe INSUFF. se richiesto (conteggio separato dal filtro min-edge)
+    skipped_insufficient = 0
     if args.skip_insufficient:
+        before = len(kept)
         kept = [r for r in kept if r.reliability != RELIABILITY_NONE]
+        skipped_insufficient = before - len(kept)
 
     shown = sorted(kept, key=lambda r: r.sort_key)
-    hidden = len(priced) - len(shown)
 
     stats: Dict[str, object] = {
         "network_calls": http.network_calls,
@@ -895,10 +898,13 @@ def run(args: argparse.Namespace) -> int:
         print(render_table(shown, settings, width=args.width or None))
     else:
         print("Nessuna riga con quote disponibili per i criteri scelti.")
-    if hidden:
+    if hidden and threshold is not None:
         print(f"\n({hidden} righe con edge sotto la soglia --min-edge "
               f"{threshold:g}% non sono mostrate; restano nel CSV/JSON solo se "
               "la soglia viene abbassata.)")
+    if skipped_insufficient:
+        print(f"\n({skipped_insufficient} righe marcate INSUFF. nascoste da "
+              "--skip-insufficient; restano nel CSV/JSON.)")
 
     if unpriced:
         print("\n" + SEPARATOR)
